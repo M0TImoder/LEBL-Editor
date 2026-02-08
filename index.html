@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LEBL Editor</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <div id="app" class="app_root">
+      <header class="app_header">
+        <div class="app_title_area">
+          <h1 class="app_title">LEBL Editor</h1>
+          <p class="app_subtitle">Pythonとブロックの双方向編集環境</p>
+        </div>
+        <div class="app_actions">
+          <button id="save_button" class="app_button" type="button">保存</button>
+          <button id="load_button" class="app_button" type="button">読み込み</button>
+          <button id="theme_toggle" class="app_button" type="button">ダーク</button>
+        </div>
+      </header>
+      <main class="app_main">
+        <section class="pane code_pane">
+          <div class="pane_header">Pythonコード</div>
+          <textarea id="code_editor" class="code_editor" spellcheck="false"></textarea>
+        </section>
+        <section class="pane block_pane">
+          <div class="pane_header">ブロック</div>
+          <div id="blockly_workspace" class="blockly_workspace"></div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
