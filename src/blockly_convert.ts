@@ -857,7 +857,10 @@ export const ir_from_blocks = (): ir_program => {
     throw new Error("startブロックは1つだけ配置");
   }
   if (event_blocks.length === 1) {
-    if (top_blocks.length > 1) {
+    const statement_top_blocks = top_blocks.filter(
+      (block) => block.type !== block_type_event_start && block.previousConnection !== null,
+    );
+    if (statement_top_blocks.length > 0) {
       throw new Error("startブロック以外のトップレベルは配置不可");
     }
     const event_block = event_blocks[0];
@@ -872,7 +875,7 @@ export const ir_from_blocks = (): ir_program => {
       dirty: true,
     };
   }
-  const sorted = top_blocks.sort(
+  const sorted = [...top_blocks].sort(
     (left, right) =>
       left.getRelativeToSurfaceXY().y - right.getRelativeToSurfaceXY().y,
   );
@@ -1110,10 +1113,15 @@ const cases_from_chain = (start_block: Blockly.Block | null): ir_case_block => {
   };
 };
 
+const default_identifier_expr = (): expr => ({
+  kind: "Identifier",
+  data: { meta: make_meta(), name: "_" },
+});
+
 const expr_from_input = (block: Blockly.Block, input_name: string): expr => {
   const target = block.getInputTargetBlock(input_name);
   if (!target) {
-    throw new Error("式が不足");
+    return default_identifier_expr();
   }
   return expr_from_block(target);
 };
@@ -1133,7 +1141,10 @@ const expr_from_block = (block: Blockly.Block): expr => {
           literal: { kind: "Number", data: { raw: block.getFieldValue("value") ?? "0" } },
         },
       };
-    case block_type_string:
+    case block_type_string: {
+      const str_value = block.getFieldValue("value") ?? "";
+      const needs_escape = str_value.includes("'") || str_value.includes("\\");
+      const escaped_value = str_value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
       return {
         kind: "Literal",
         data: {
@@ -1141,14 +1152,15 @@ const expr_from_block = (block: Blockly.Block): expr => {
           literal: {
             kind: "String",
             data: {
-              raw: `'${block.getFieldValue("value") ?? ""}'`,
-              value: block.getFieldValue("value") ?? "",
+              raw: `'${escaped_value}'`,
+              value: str_value,
               quote: "single",
-              escaped: false,
+              escaped: needs_escape,
             },
           },
         },
       };
+    }
     case block_type_bool:
       return {
         kind: "Literal",
@@ -1187,9 +1199,10 @@ const expr_from_block = (block: Blockly.Block): expr => {
       for (let index = 0; index < bool_block.itemCount_; index += 1) {
         const input = bool_block.getInput(`VALUE${index}`);
         if (!input?.connection?.targetBlock()) {
-          throw new Error("boolop値が不足");
+          values.push(default_identifier_expr());
+        } else {
+          values.push(expr_from_block(input.connection.targetBlock() as Blockly.Block));
         }
-        values.push(expr_from_block(input.connection.targetBlock() as Blockly.Block));
       }
       return {
         kind: "BoolOp",
@@ -1209,9 +1222,10 @@ const expr_from_block = (block: Blockly.Block): expr => {
         ops.push(op_value);
         const input = compare.getInput(`CMP${index}`);
         if (!input?.connection?.targetBlock()) {
-          throw new Error("compare値が不足");
+          comparators.push(default_identifier_expr());
+        } else {
+          comparators.push(expr_from_block(input.connection.targetBlock() as Blockly.Block));
         }
-        comparators.push(expr_from_block(input.connection.targetBlock() as Blockly.Block));
       }
       return {
         kind: "Compare",
@@ -1278,9 +1292,10 @@ const expr_from_block = (block: Blockly.Block): expr => {
       for (let index = 0; index < call_block.itemCount_; index += 1) {
         const input = call_block.getInput(`ARG${index}`);
         if (!input?.connection?.targetBlock()) {
-          throw new Error("call引数が不足");
+          args.push(default_identifier_expr());
+        } else {
+          args.push(expr_from_block(input.connection.targetBlock() as Blockly.Block));
         }
-        args.push(expr_from_block(input.connection.targetBlock() as Blockly.Block));
       }
       return {
         kind: "Call",
@@ -1297,9 +1312,10 @@ const expr_from_block = (block: Blockly.Block): expr => {
       for (let index = 0; index < tuple.itemCount_; index += 1) {
         const input = tuple.getInput(`ITEM${index}`);
         if (!input?.connection?.targetBlock()) {
-          throw new Error("tuple要素が不足");
+          elements.push(default_identifier_expr());
+        } else {
+          elements.push(expr_from_block(input.connection.targetBlock() as Blockly.Block));
         }
-        elements.push(expr_from_block(input.connection.targetBlock() as Blockly.Block));
       }
       return {
         kind: "Tuple",
@@ -1341,9 +1357,10 @@ const expr_from_block = (block: Blockly.Block): expr => {
       for (let index = 0; index < list.itemCount_; index += 1) {
         const input = list.getInput(`ITEM${index}`);
         if (!input?.connection?.targetBlock()) {
-          throw new Error("list要素が不足");
+          elements.push(default_identifier_expr());
+        } else {
+          elements.push(expr_from_block(input.connection.targetBlock() as Blockly.Block));
         }
-        elements.push(expr_from_block(input.connection.targetBlock() as Blockly.Block));
       }
       return {
         kind: "List",
@@ -1359,13 +1376,14 @@ const expr_from_block = (block: Blockly.Block): expr => {
       for (let index = 0; index < dict.itemCount_; index += 1) {
         const key_input = dict.getInput(`KEY${index}`);
         const value_input = dict.getInput(`VALUE${index}`);
-        if (!key_input?.connection?.targetBlock() || !value_input?.connection?.targetBlock()) {
-          throw new Error("dict要素が不足");
-        }
         entries.push({
           meta: make_meta(),
-          key: expr_from_block(key_input.connection.targetBlock() as Blockly.Block),
-          value: expr_from_block(value_input.connection.targetBlock() as Blockly.Block),
+          key: key_input?.connection?.targetBlock()
+            ? expr_from_block(key_input.connection.targetBlock() as Blockly.Block)
+            : default_identifier_expr(),
+          value: value_input?.connection?.targetBlock()
+            ? expr_from_block(value_input.connection.targetBlock() as Blockly.Block)
+            : default_identifier_expr(),
         });
       }
       return {
@@ -1382,9 +1400,10 @@ const expr_from_block = (block: Blockly.Block): expr => {
       for (let index = 0; index < set_block_value.itemCount_; index += 1) {
         const input = set_block_value.getInput(`ITEM${index}`);
         if (!input?.connection?.targetBlock()) {
-          throw new Error("set要素が不足");
+          elements.push(default_identifier_expr());
+        } else {
+          elements.push(expr_from_block(input.connection.targetBlock() as Blockly.Block));
         }
-        elements.push(expr_from_block(input.connection.targetBlock() as Blockly.Block));
       }
       return {
         kind: "Set",
@@ -1403,7 +1422,18 @@ const expr_from_block = (block: Blockly.Block): expr => {
       const key =
         key_input != null ? expr_from_block(key_input as Blockly.Block) : null;
       if (kind === "dict" && !key) {
-        throw new Error("dict comprehensionのkeyが不足");
+        return {
+          kind: "Comprehension",
+          data: {
+            kind: "dict",
+            data: {
+              meta: make_meta(),
+              key: default_identifier_expr(),
+              value: element,
+              fors: [],
+            },
+          },
+        };
       }
       const fors: comprehension_for[] = [];
       for (let index = 0; index < for_count; index += 1) {
@@ -1414,9 +1444,10 @@ const expr_from_block = (block: Blockly.Block): expr => {
         for (let if_index = 0; if_index < if_count; if_index += 1) {
           const input = comp.getInput(`IF${index}_${if_index}`);
           if (!input?.connection?.targetBlock()) {
-            throw new Error("comprehension ifが不足");
+            ifs.push(default_identifier_expr());
+          } else {
+            ifs.push(expr_from_block(input.connection.targetBlock() as Blockly.Block));
           }
-          ifs.push(expr_from_block(input.connection.targetBlock() as Blockly.Block));
         }
         fors.push({
           meta: make_meta(),
@@ -1480,6 +1511,10 @@ export const blocks_from_ir = (ir: ir_program) => {
     return;
   }
   Blockly.Events.disable();
+  const metrics = workspace.getMetrics();
+  const scroll_x = metrics?.viewLeft ?? 0;
+  const scroll_y = metrics?.viewTop ?? 0;
+  const scale = workspace.scale;
   workspace.clear();
   const entry_block = workspace.newBlock(block_type_event_start);
   attach_statement_body(entry_block, "BODY", ir.body);
@@ -1487,6 +1522,8 @@ export const blocks_from_ir = (ir: ir_program) => {
   (entry_block as Blockly.BlockSvg).moveBy(24, 24);
   workspace.cleanUp();
   Blockly.Events.enable();
+  workspace.scale = scale;
+  workspace.scroll(scroll_x, scroll_y);
   workspace.render();
   refresh_declared_variable_category();
 };

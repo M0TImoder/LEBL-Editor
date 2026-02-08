@@ -21,6 +21,7 @@ export type token_range = {
 export type trivia = {
   kind: "Comment" | "RawWhitespace" | "Blank";
   data: unknown;
+  span: span;
 };
 
 export type node_meta = {

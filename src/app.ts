@@ -50,6 +50,9 @@ let load_button: HTMLButtonElement | null = null;
 let run_button: HTMLButtonElement | null = null;
 let is_syncing = false;
 let current_theme: theme_mode = "light";
+let code_sync_timer: ReturnType<typeof setTimeout> | null = null;
+let pending_code_sync: string | null = null;
+const code_sync_delay_ms = 400;
 
 const parse_python_to_ir = async (source: string) =>
   invoke<ir_program>("parse_python_to_ir", { source });
@@ -114,6 +117,7 @@ const ensure_workspace = () => {
 
 const sync_code_to_blocks = async (source: string) => {
   if (is_syncing) {
+    pending_code_sync = source;
     return;
   }
   is_syncing = true;
@@ -126,6 +130,11 @@ const sync_code_to_blocks = async (source: string) => {
     show_sync_error_block();
   } finally {
     is_syncing = false;
+    if (pending_code_sync !== null) {
+      const next_source = pending_code_sync;
+      pending_code_sync = null;
+      sync_code_to_blocks(next_source);
+    }
   }
 };
 
@@ -149,7 +158,13 @@ const sync_blocks_to_code = async () => {
 };
 
 const schedule_code_sync = (source: string) => {
-  sync_code_to_blocks(source);
+  if (code_sync_timer !== null) {
+    clearTimeout(code_sync_timer);
+  }
+  code_sync_timer = setTimeout(() => {
+    code_sync_timer = null;
+    sync_code_to_blocks(source);
+  }, code_sync_delay_ms);
 };
 
 const load_source_from_storage = () =>
@@ -204,11 +219,19 @@ export const init_app = () => {
 
     const workspace = get_workspace();
     if (workspace) {
-      workspace.addChangeListener((event) => {
-        if (is_syncing || event.type === Blockly.Events.UI) {
+      workspace.addChangeListener((event: Blockly.Events.Abstract) => {
+        if (is_syncing) {
           return;
         }
-        sync_blocks_to_code();
+        const dominated =
+          event.type === Blockly.Events.UI ||
+          event.type === Blockly.Events.VIEWPORT_CHANGE ||
+          event.type === Blockly.Events.TOOLBOX_ITEM_SELECT ||
+          event.type === Blockly.Events.CLICK;
+        if (dominated) {
+          return;
+        }
+        sync_blocks_to_code().catch(() => {});
         refresh_declared_variable_category();
       });
     }

@@ -1,11 +1,10 @@
 use super::*;
-use std::iter::Peekable;
-use std::str::Chars;
 
 pub(super) struct Lexer {
-    chars: Peekable<Chars<'static>>,
-    source: String,
+    source: Vec<char>,
+    source_str: String,
     offset: usize,
+    char_index: usize,
     line: usize,
     column: usize,
     paren_depth: usize,
@@ -22,11 +21,12 @@ pub(super) struct LexedSource {
 
 impl Lexer {
     pub(super) fn new(source: String) -> Self {
-        let leaked: &'static str = Box::leak(source.clone().into_boxed_str());
+        let chars: Vec<char> = source.chars().collect();
         Self {
-            chars: leaked.chars().peekable(),
-            source,
+            source: chars,
+            source_str: source,
             offset: 0,
+            char_index: 0,
             line: 1,
             column: 1,
             paren_depth: 0,
@@ -368,7 +368,7 @@ impl Lexer {
         );
         let end = self.current_position();
         let raw = self
-            .source
+            .source_str
             .get(start.offset..end.offset)
             .unwrap_or("")
             .to_string();
@@ -382,12 +382,13 @@ impl Lexer {
         }
     }
 
-    fn peek_char(&mut self) -> Option<char> {
-        self.chars.peek().copied()
+    fn peek_char(&self) -> Option<char> {
+        self.source.get(self.char_index).copied()
     }
 
     fn advance_char(&mut self) {
-        if let Some(ch) = self.chars.next() {
+        if let Some(&ch) = self.source.get(self.char_index) {
+            self.char_index += 1;
             self.offset += ch.len_utf8();
             if ch == '\n' {
                 self.line += 1;

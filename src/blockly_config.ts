@@ -752,7 +752,7 @@ export const register_blocks = () => {
             ["generator", "generator"],
             ["set", "set"],
           ], (value) => {
-            (this as comprehension_block).updateShape_();
+            setTimeout(() => (this as comprehension_block).updateShape_(), 0);
             return value;
           }),
           "KIND",
