@@ -66,6 +66,11 @@ body {
   font-size: 20px;
 }
 
+.app_title_area {
+  display: flex;
+  flex-direction: column;
+}
+
 .app_subtitle {
   margin: 4px 0 0;
   color: var(--app_muted);
@@ -88,6 +93,17 @@ body {
   transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
+.app_button_primary {
+  border-color: transparent;
+  background-color: var(--app_accent);
+  color: #ffffff;
+}
+
+.app_button_primary:hover {
+  border-color: transparent;
+  background-color: #3f5be6;
+}
+
 .app_button:hover {
   background-color: var(--app_button_hover);
   border-color: var(--app_accent);
@@ -97,9 +113,16 @@ body {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-rows: minmax(0, 1fr) 200px;
   gap: 16px;
   padding: 16px;
+}
+
+.pane_group {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
 }
 
 .pane {
@@ -140,8 +163,29 @@ body {
   width: 100%;
 }
 
+.output_pane {
+  min-height: 0;
+}
+
+.output_console {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 14px;
+  background-color: var(--app_code_bg);
+  color: inherit;
+  font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+  font-size: 13px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
 @media (max-width: 980px) {
   .app_main {
+    grid-template-rows: minmax(0, 1fr) 180px;
+  }
+
+  .pane_group {
     grid-template-columns: 1fr;
   }
 }

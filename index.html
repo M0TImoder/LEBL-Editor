@@ -16,19 +16,28 @@
           <p class="app_subtitle">Pythonとブロックの双方向編集環境</p>
         </div>
         <div class="app_actions">
+          <button id="run_button" class="app_button app_button_primary" type="button">
+            実行
+          </button>
           <button id="save_button" class="app_button" type="button">保存</button>
           <button id="load_button" class="app_button" type="button">読み込み</button>
           <button id="theme_toggle" class="app_button" type="button">ダーク</button>
         </div>
       </header>
       <main class="app_main">
-        <section class="pane code_pane">
-          <div class="pane_header">Pythonコード</div>
-          <textarea id="code_editor" class="code_editor" spellcheck="false"></textarea>
-        </section>
-        <section class="pane block_pane">
-          <div class="pane_header">ブロック</div>
-          <div id="blockly_workspace" class="blockly_workspace"></div>
+        <div class="pane_group">
+          <section class="pane code_pane">
+            <div class="pane_header">Pythonコード</div>
+            <textarea id="code_editor" class="code_editor" spellcheck="false"></textarea>
+          </section>
+          <section class="pane block_pane">
+            <div class="pane_header">ブロック</div>
+            <div id="blockly_workspace" class="blockly_workspace"></div>
+          </section>
+        </div>
+        <section class="pane output_pane">
+          <div class="pane_header">実行結果</div>
+          <pre id="output_console" class="output_console"></pre>
         </section>
       </main>
     </div>
