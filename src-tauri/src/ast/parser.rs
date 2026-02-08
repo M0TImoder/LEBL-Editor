@@ -89,11 +89,21 @@ impl Parser {
             TokenKind::Keyword(Keyword::For) => self.parse_for_stmt(),
             TokenKind::Keyword(Keyword::Match) => self.parse_match_stmt(),
             TokenKind::Keyword(Keyword::Def) => self.parse_function_def(),
+            TokenKind::Keyword(Keyword::Class) => self.parse_class_def(),
             TokenKind::Keyword(Keyword::Pass) => self.parse_pass_stmt(),
+            TokenKind::Keyword(Keyword::Return) => self.parse_return_stmt(),
+            TokenKind::Keyword(Keyword::Break) => self.parse_break_stmt(),
+            TokenKind::Keyword(Keyword::Continue) => self.parse_continue_stmt(),
+            TokenKind::Keyword(Keyword::Import) => self.parse_import_stmt(),
+            TokenKind::Keyword(Keyword::From) => self.parse_from_import_stmt(),
+            TokenKind::Keyword(Keyword::Try) => self.parse_try_stmt(),
             TokenKind::Keyword(Keyword::Elif) | TokenKind::Keyword(Keyword::Else) => {
                 Err(self.error("elif/else must follow if"))
             }
             TokenKind::Keyword(Keyword::Case) => Err(self.error("case outside match")),
+            TokenKind::Keyword(Keyword::Except) | TokenKind::Keyword(Keyword::Finally) => {
+                Err(self.error("except/finally must follow try"))
+            }
             _ => self.parse_simple_stmt(),
         }
     }
@@ -106,6 +116,85 @@ impl Parser {
         Ok(Stmt::Pass(PassStmt { meta }))
     }
 
+    fn parse_return_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.index;
+        self.expect_keyword(Keyword::Return)?;
+        let value = if self.check_tag(TokenTag::Newline) || self.check_tag(TokenTag::Eof) || self.check_tag(TokenTag::Dedent) {
+            None
+        } else {
+            Some(self.parse_expression()?)
+        };
+        self.expect_line_end()?;
+        let meta = self.node_meta(start, self.index.saturating_sub(1));
+        Ok(Stmt::Return(ReturnStmt { meta, value }))
+    }
+
+    fn parse_break_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.index;
+        self.expect_keyword(Keyword::Break)?;
+        self.expect_line_end()?;
+        let meta = self.node_meta(start, self.index.saturating_sub(1));
+        Ok(Stmt::Break(BreakStmt { meta }))
+    }
+
+    fn parse_continue_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.index;
+        self.expect_keyword(Keyword::Continue)?;
+        self.expect_line_end()?;
+        let meta = self.node_meta(start, self.index.saturating_sub(1));
+        Ok(Stmt::Continue(ContinueStmt { meta }))
+    }
+
+    fn parse_import_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.index;
+        self.expect_keyword(Keyword::Import)?;
+        let module = self.parse_dotted_name()?;
+        let mut alias = None;
+        if self.match_keyword(Keyword::As) {
+            alias = Some(self.expect_identifier()?);
+        }
+        self.expect_line_end()?;
+        let meta = self.node_meta(start, self.index.saturating_sub(1));
+        let names = if alias.is_some() {
+            vec![ImportName { name: module.clone(), alias }]
+        } else {
+            vec![]
+        };
+        Ok(Stmt::Import(ImportStmt { meta, module, names, is_from: false }))
+    }
+
+    fn parse_from_import_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.index;
+        self.expect_keyword(Keyword::From)?;
+        let module = self.parse_dotted_name()?;
+        self.expect_keyword(Keyword::Import)?;
+        let mut names = Vec::new();
+        loop {
+            let name = self.expect_identifier()?;
+            let alias = if self.match_keyword(Keyword::As) {
+                Some(self.expect_identifier()?)
+            } else {
+                None
+            };
+            names.push(ImportName { name, alias });
+            if !self.match_tag(TokenTag::Comma) {
+                break;
+            }
+        }
+        self.expect_line_end()?;
+        let meta = self.node_meta(start, self.index.saturating_sub(1));
+        Ok(Stmt::Import(ImportStmt { meta, module, names, is_from: true }))
+    }
+
+    fn parse_dotted_name(&mut self) -> Result<String, ParseError> {
+        let mut name = self.expect_identifier()?;
+        while self.match_tag(TokenTag::Dot) {
+            name.push('.');
+            name.push_str(&self.expect_identifier()?);
+        }
+        Ok(name)
+    }
+
     fn parse_simple_stmt(&mut self) -> Result<Stmt, ParseError> {
         let start = self.index;
         let expr = self.parse_expression()?;
@@ -116,6 +205,17 @@ impl Parser {
             return Ok(Stmt::Assign(AssignStmt {
                 meta,
                 target: expr,
+                value,
+            }));
+        }
+        if let Some(op) = self.try_aug_assign_op() {
+            let value = self.parse_expression_no_generator()?;
+            self.expect_line_end()?;
+            let meta = self.node_meta(start, self.index.saturating_sub(1));
+            return Ok(Stmt::AugAssign(AugAssignStmt {
+                meta,
+                target: expr,
+                op,
                 value,
             }));
         }
@@ -220,6 +320,37 @@ impl Parser {
         }))
     }
 
+    fn parse_class_def(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.index;
+        self.expect_keyword(Keyword::Class)?;
+        let name = self.expect_identifier()?;
+        let mut bases = Vec::new();
+        if self.match_tag(TokenTag::LParen) {
+            if !self.check_tag(TokenTag::RParen) {
+                loop {
+                    bases.push(self.parse_expression()?);
+                    if self.match_tag(TokenTag::Comma) {
+                        if self.check_tag(TokenTag::RParen) {
+                            break;
+                        }
+                        continue;
+                    }
+                    break;
+                }
+            }
+            self.expect_tag(TokenTag::RParen)?;
+        }
+        self.expect_tag(TokenTag::Colon)?;
+        let body = self.parse_block()?;
+        let meta = self.node_meta(start, self.index.saturating_sub(1));
+        Ok(Stmt::ClassDef(ClassDefStmt {
+            meta,
+            name,
+            bases,
+            body,
+        }))
+    }
+
     fn parse_match_stmt(&mut self) -> Result<Stmt, ParseError> {
         if !self.config.features.match_stmt {
             return Err(self.error("match is disabled"));
@@ -234,6 +365,47 @@ impl Parser {
             meta,
             subject,
             cases,
+        }))
+    }
+
+    fn parse_try_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.index;
+        self.expect_keyword(Keyword::Try)?;
+        self.expect_tag(TokenTag::Colon)?;
+        let body = self.parse_block()?;
+        let mut handlers = Vec::new();
+        while self.match_keyword(Keyword::Except) {
+            let handler_start = self.index.saturating_sub(1);
+            let mut exception_type = None;
+            let mut name = None;
+            if !self.check_tag(TokenTag::Colon) {
+                exception_type = Some(self.parse_expression()?);
+                if self.match_keyword(Keyword::As) {
+                    name = Some(self.expect_identifier()?);
+                }
+            }
+            self.expect_tag(TokenTag::Colon)?;
+            let handler_body = self.parse_block()?;
+            let meta = self.node_meta(handler_start, self.index.saturating_sub(1));
+            handlers.push(ExceptHandler {
+                meta,
+                exception_type,
+                name,
+                body: handler_body,
+            });
+        }
+        let finally_body = if self.match_keyword(Keyword::Finally) {
+            self.expect_tag(TokenTag::Colon)?;
+            Some(self.parse_block()?)
+        } else {
+            None
+        };
+        let meta = self.node_meta(start, self.index.saturating_sub(1));
+        Ok(Stmt::Try(TryStmt {
+            meta,
+            body,
+            handlers,
+            finally_body,
         }))
     }
 
@@ -523,9 +695,23 @@ impl Parser {
             if self.match_tag(TokenTag::LParen) {
                 let start = self.index.saturating_sub(1);
                 let mut args = Vec::new();
+                let mut kwargs = Vec::new();
                 if !self.check_tag(TokenTag::RParen) {
                     loop {
-                        args.push(self.parse_expression()?);
+                        let arg_expr = self.parse_expression()?;
+                        if let Expr::Identifier(ref ident) = arg_expr {
+                            if self.match_operator(Operator::Assign) {
+                                let value = self.parse_expression()?;
+                                kwargs.push(KeywordArg {
+                                    name: ident.name.clone(),
+                                    value,
+                                });
+                            } else {
+                                args.push(arg_expr);
+                            }
+                        } else {
+                            args.push(arg_expr);
+                        }
                         if self.match_tag(TokenTag::Comma) {
                             if self.check_tag(TokenTag::RParen) {
                                 break;
@@ -541,6 +727,7 @@ impl Parser {
                     meta,
                     callee: Box::new(expr),
                     args,
+                    kwargs,
                 });
                 continue;
             }
@@ -557,7 +744,7 @@ impl Parser {
             }
             if self.match_tag(TokenTag::LBracket) {
                 let start = self.index.saturating_sub(1);
-                let index = self.parse_expression()?;
+                let index = self.parse_slice_or_expr()?;
                 self.expect_tag(TokenTag::RBracket)?;
                 let meta = self.node_meta(start, self.index.saturating_sub(1));
                 expr = Expr::Subscript(SubscriptExpr {
@@ -589,6 +776,28 @@ impl Parser {
                 let literal = self.expect_string()?;
                 let meta = self.node_meta(start, self.index.saturating_sub(1));
                 Ok(Expr::Literal(LiteralExpr { meta, literal }))
+            }
+            TokenKind::FString(fstring) => {
+                let fstring = fstring.clone();
+                self.advance();
+                let mut parts = Vec::new();
+                for part in &fstring.parts {
+                    match part {
+                        FStringTokenPart::Literal(text) => {
+                            parts.push(FStringPart::Literal(text.clone()));
+                        }
+                        FStringTokenPart::ExprText(text) => {
+                            let expr = self.parse_fstring_expr(text)?;
+                            parts.push(FStringPart::Expr(expr));
+                        }
+                    }
+                }
+                let meta = self.node_meta(start, self.index.saturating_sub(1));
+                Ok(Expr::FString(FStringExpr {
+                    meta,
+                    parts,
+                    quote: fstring.quote,
+                }))
             }
             TokenKind::Keyword(Keyword::True) => {
                 self.advance();
@@ -842,6 +1051,16 @@ impl Parser {
                 precedence: BinaryOp::Mod.precedence(),
                 assoc: Associativity::Left,
             }),
+            TokenKind::Operator(Operator::FloorDiv) => Some(BinaryOpInfo {
+                op: BinaryOp::FloorDiv,
+                precedence: BinaryOp::FloorDiv.precedence(),
+                assoc: Associativity::Left,
+            }),
+            TokenKind::Operator(Operator::Power) => Some(BinaryOpInfo {
+                op: BinaryOp::Power,
+                precedence: BinaryOp::Power.precedence(),
+                assoc: Associativity::Right,
+            }),
             _ => None,
         }
     }
@@ -964,6 +1183,14 @@ impl Parser {
         }
     }
 
+    fn parse_fstring_expr(&self, text: &str) -> Result<Expr, ParseError> {
+        let mut lexer = Lexer::new(text.to_string());
+        let lexed = lexer.lex()?;
+        let tokens = attach_trivia(insert_indent_tokens(lexed.tokens));
+        let mut sub_parser = Parser::new(tokens, self.config, self.indent_width);
+        sub_parser.parse_expression()
+    }
+
     fn expect_keyword(&mut self, keyword: Keyword) -> Result<(), ParseError> {
         match self.peek_kind() {
             TokenKind::Keyword(value) if value == keyword => {
@@ -992,6 +1219,22 @@ impl Parser {
             }
             _ => false,
         }
+    }
+
+    fn try_aug_assign_op(&mut self) -> Option<Operator> {
+        let ops = [
+            Operator::PlusAssign,
+            Operator::MinusAssign,
+            Operator::StarAssign,
+            Operator::SlashAssign,
+            Operator::PercentAssign,
+        ];
+        for op in ops {
+            if self.match_operator(op) {
+                return Some(op);
+            }
+        }
+        None
     }
 
     fn match_tag(&mut self, tag: TokenTag) -> bool {
@@ -1063,5 +1306,42 @@ impl Parser {
         };
         self.next_id = self.next_id.saturating_add(1);
         meta
+    }
+
+    fn parse_slice_or_expr(&mut self) -> Result<Expr, ParseError> {
+        let start = self.index;
+        if self.check_tag(TokenTag::Colon) {
+            return self.parse_slice_from_colon(start, None);
+        }
+        let expr = self.parse_expression()?;
+        if self.check_tag(TokenTag::Colon) {
+            return self.parse_slice_from_colon(start, Some(expr));
+        }
+        Ok(expr)
+    }
+
+    fn parse_slice_from_colon(&mut self, start: usize, lower: Option<Expr>) -> Result<Expr, ParseError> {
+        self.expect_tag(TokenTag::Colon)?;
+        let upper = if !self.check_tag(TokenTag::Colon) && !self.check_tag(TokenTag::RBracket) {
+            Some(Box::new(self.parse_expression()?))
+        } else {
+            None
+        };
+        let step = if self.match_tag(TokenTag::Colon) {
+            if !self.check_tag(TokenTag::RBracket) {
+                Some(Box::new(self.parse_expression()?))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let meta = self.node_meta(start, self.index.saturating_sub(1));
+        Ok(Expr::Slice(SliceExpr {
+            meta,
+            lower: lower.map(Box::new),
+            upper,
+            step,
+        }))
     }
 }

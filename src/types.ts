@@ -69,7 +69,9 @@ export type binary_op =
   | "sub"
   | "mul"
   | "div"
-  | "mod";
+  | "mod"
+  | "floor_div"
+  | "power";
 
 export type unary_op = "neg" | "not";
 
@@ -106,7 +108,31 @@ export type expr =
   | { kind: "List"; data: list_expr }
   | { kind: "Dict"; data: dict_expr }
   | { kind: "Set"; data: set_expr }
-  | { kind: "Comprehension"; data: comprehension_expr };
+  | { kind: "Comprehension"; data: comprehension_expr }
+  | { kind: "Slice"; data: slice_expr }
+  | { kind: "FString"; data: fstring_expr };
+
+export type slice_expr = {
+  meta: node_meta;
+  lower: expr | null;
+  upper: expr | null;
+  step: expr | null;
+};
+
+export type keyword_arg = {
+  name: string;
+  value: expr;
+};
+
+export type fstring_part =
+  | { kind: "Literal"; data: string }
+  | { kind: "Expr"; data: expr };
+
+export type fstring_expr = {
+  meta: node_meta;
+  parts: fstring_part[];
+  quote: "single" | "double";
+};
 
 export type identifier_expr = {
   meta: node_meta;
@@ -161,6 +187,7 @@ export type call_expr = {
   meta: node_meta;
   callee: expr;
   args: expr[];
+  kwargs: keyword_arg[];
 };
 
 export type tuple_expr = {
@@ -271,7 +298,14 @@ export type ir_stmt =
   | { kind: "Assign"; data: ir_assign_stmt }
   | { kind: "Expr"; data: ir_expr_stmt }
   | { kind: "Pass"; data: ir_pass_stmt }
-  | { kind: "Empty"; data: ir_empty_stmt };
+  | { kind: "Empty"; data: ir_empty_stmt }
+  | { kind: "Return"; data: ir_return_stmt }
+  | { kind: "Break"; data: ir_break_stmt }
+  | { kind: "Continue"; data: ir_continue_stmt }
+  | { kind: "AugAssign"; data: ir_aug_assign_stmt }
+  | { kind: "Import"; data: ir_import_stmt }
+  | { kind: "Try"; data: ir_try_stmt }
+  | { kind: "ClassDef"; data: ir_class_def };
 
 export type ir_if_stmt = {
   meta: node_meta;
@@ -333,6 +367,59 @@ export type ir_empty_stmt = {
   source: "Source" | "Generated";
 };
 
+export type ir_return_stmt = {
+  meta: node_meta;
+  value: expr | null;
+};
+
+export type ir_break_stmt = {
+  meta: node_meta;
+};
+
+export type ir_continue_stmt = {
+  meta: node_meta;
+};
+
+export type ir_aug_assign_stmt = {
+  meta: node_meta;
+  target: expr;
+  op: string;
+  value: expr;
+};
+
+export type import_name = {
+  name: string;
+  alias: string | null;
+};
+
+export type ir_import_stmt = {
+  meta: node_meta;
+  module: string;
+  names: import_name[];
+  is_from: boolean;
+};
+
+export type ir_except_handler = {
+  meta: node_meta;
+  exception_type: expr | null;
+  name: string | null;
+  body: ir_block;
+};
+
+export type ir_try_stmt = {
+  meta: node_meta;
+  body: ir_block;
+  handlers: ir_except_handler[];
+  finally_body: ir_block | null;
+};
+
+export type ir_class_def = {
+  meta: node_meta;
+  name: string;
+  bases: expr[];
+  body: ir_block;
+};
+
 export type ir_program = {
   meta: node_meta;
   indent_width: number;
@@ -390,5 +477,20 @@ export type set_block = Blockly.Block & {
 export type comprehension_block = Blockly.Block & {
   forCount_: number;
   ifCounts_: number[];
+  updateShape_: () => void;
+};
+
+export type try_block = Blockly.Block & {
+  handlerCount_: number;
+  updateShape_: () => void;
+};
+
+export type class_def_block = Blockly.Block & {
+  baseCount_: number;
+  updateShape_: () => void;
+};
+
+export type import_block = Blockly.Block & {
+  nameCount_: number;
   updateShape_: () => void;
 };

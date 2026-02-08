@@ -100,6 +100,15 @@ fn render_stmt(
             lines.push(format!("{prefix}def {}({}):", stmt.name, params));
             render_block(&stmt.body, indent_level + 1, indent_width, lines, context);
         }
+        Stmt::ClassDef(stmt) => {
+            if stmt.bases.is_empty() {
+                lines.push(format!("{prefix}class {}:", stmt.name));
+            } else {
+                let bases = stmt.bases.iter().map(|b| render_expr(b, 0)).collect::<Vec<_>>().join(", ");
+                lines.push(format!("{prefix}class {}({}):", stmt.name, bases));
+            }
+            render_block(&stmt.body, indent_level + 1, indent_width, lines, context);
+        }
         Stmt::Match(stmt) => {
             lines.push(format!(
                 "{prefix}match {}:",
@@ -114,13 +123,93 @@ fn render_stmt(
                 render_expr(&stmt.value, 0)
             ));
         }
+        Stmt::AugAssign(stmt) => {
+            let op_str = match stmt.op {
+                Operator::PlusAssign => "+=",
+                Operator::MinusAssign => "-=",
+                Operator::StarAssign => "*=",
+                Operator::SlashAssign => "/=",
+                Operator::PercentAssign => "%=",
+                _ => "?=",
+            };
+            lines.push(format!(
+                "{prefix}{} {} {}",
+                render_expr(&stmt.target, 0),
+                op_str,
+                render_expr(&stmt.value, 0)
+            ));
+        }
         Stmt::Expr(stmt) => {
             lines.push(format!("{prefix}{}", render_expr(&stmt.expr, 0)));
         }
         Stmt::Pass(_) => {
             lines.push(format!("{prefix}pass"));
         }
+        Stmt::Return(stmt) => {
+            if let Some(value) = &stmt.value {
+                lines.push(format!("{prefix}return {}", render_expr(value, 0)));
+            } else {
+                lines.push(format!("{prefix}return"));
+            }
+        }
+        Stmt::Break(_) => {
+            lines.push(format!("{prefix}break"));
+        }
+        Stmt::Continue(_) => {
+            lines.push(format!("{prefix}continue"));
+        }
         Stmt::Empty(_) => lines.push(String::new()),
+        Stmt::Import(stmt) => {
+            if stmt.is_from {
+                let names_str: Vec<String> = stmt.names.iter().map(|n| {
+                    if let Some(alias) = &n.alias {
+                        format!("{} as {}", n.name, alias)
+                    } else {
+                        n.name.clone()
+                    }
+                }).collect();
+                lines.push(format!("{prefix}from {} import {}", stmt.module, names_str.join(", ")));
+            } else {
+                if let Some(first) = stmt.names.first() {
+                    if let Some(alias) = &first.alias {
+                        lines.push(format!("{prefix}import {} as {}", stmt.module, alias));
+                    } else {
+                        lines.push(format!("{prefix}import {}", stmt.module));
+                    }
+                } else {
+                    lines.push(format!("{prefix}import {}", stmt.module));
+                }
+            }
+        }
+        Stmt::Try(stmt) => {
+            lines.push(format!("{prefix}try:"));
+            render_block(&stmt.body, indent_level + 1, indent_width, lines, context);
+            for handler in &stmt.handlers {
+                match (&handler.exception_type, &handler.name) {
+                    (Some(exc_type), Some(name)) => {
+                        lines.push(format!(
+                            "{prefix}except {} as {}:",
+                            render_expr(exc_type, 0),
+                            name
+                        ));
+                    }
+                    (Some(exc_type), None) => {
+                        lines.push(format!(
+                            "{prefix}except {}:",
+                            render_expr(exc_type, 0)
+                        ));
+                    }
+                    _ => {
+                        lines.push(format!("{prefix}except:"));
+                    }
+                }
+                render_block(&handler.body, indent_level + 1, indent_width, lines, context);
+            }
+            if let Some(finally_body) = &stmt.finally_body {
+                lines.push(format!("{prefix}finally:"));
+                render_block(finally_body, indent_level + 1, indent_width, lines, context);
+            }
+        }
     }
 }
 
@@ -165,10 +254,17 @@ fn stmt_meta(stmt: &Stmt) -> &NodeMeta {
         Stmt::For(stmt) => &stmt.meta,
         Stmt::Match(stmt) => &stmt.meta,
         Stmt::FunctionDef(stmt) => &stmt.meta,
+        Stmt::ClassDef(stmt) => &stmt.meta,
         Stmt::Assign(stmt) => &stmt.meta,
+        Stmt::AugAssign(stmt) => &stmt.meta,
         Stmt::Expr(stmt) => &stmt.meta,
         Stmt::Pass(stmt) => &stmt.meta,
+        Stmt::Return(stmt) => &stmt.meta,
+        Stmt::Break(stmt) => &stmt.meta,
+        Stmt::Continue(stmt) => &stmt.meta,
         Stmt::Empty(stmt) => &stmt.meta,
+        Stmt::Import(stmt) => &stmt.meta,
+        Stmt::Try(stmt) => &stmt.meta,
     }
 }
 
@@ -315,16 +411,30 @@ fn render_expr(expr: &Expr, parent_prec: u8) -> String {
                 parent_prec,
             )
         }
+        Expr::Slice(expr) => {
+            let lower = expr.lower.as_ref().map_or(String::new(), |e| render_expr(e, 0));
+            let upper = expr.upper.as_ref().map_or(String::new(), |e| render_expr(e, 0));
+            if let Some(step) = &expr.step {
+                format!("{}:{}:{}", lower, upper, render_expr(step, 0))
+            } else {
+                format!("{}:{}", lower, upper)
+            }
+        }
         Expr::Call(expr) => {
             let prec = 9;
             let callee = render_expr(&expr.callee, prec);
-            let args = expr
+            let args_parts: Vec<String> = expr
                 .args
                 .iter()
                 .map(|arg| render_expr(arg, 0))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let rendered = format!("{callee}({args})");
+                .collect();
+            let kwargs_parts: Vec<String> = expr
+                .kwargs
+                .iter()
+                .map(|kw| format!("{}={}", kw.name, render_expr(&kw.value, 0)))
+                .collect();
+            let all_parts: Vec<&str> = args_parts.iter().chain(kwargs_parts.iter()).map(|s| s.as_str()).collect();
+            let rendered = format!("{callee}({})", all_parts.join(", "));
             wrap_if_needed(rendered, prec, parent_prec)
         }
         Expr::Unary(expr) => {
@@ -405,8 +515,29 @@ fn render_expr(expr: &Expr, parent_prec: u8) -> String {
                 BinaryOp::Mul => "*",
                 BinaryOp::Div => "/",
                 BinaryOp::Mod => "%",
+                BinaryOp::FloorDiv => "//",
+                BinaryOp::Power => "**",
             };
             wrap_if_needed(format!("{left} {op} {right}"), prec, parent_prec)
+        }
+        Expr::FString(expr) => {
+            let q = match expr.quote {
+                QuoteStyle::Double => '"',
+                QuoteStyle::Single => '\'',
+            };
+            let mut out = format!("f{q}");
+            for part in &expr.parts {
+                match part {
+                    FStringPart::Literal(s) => out.push_str(s),
+                    FStringPart::Expr(e) => {
+                        out.push('{');
+                        out.push_str(&render_expr(e, 0));
+                        out.push('}');
+                    }
+                }
+            }
+            out.push(q);
+            out
         }
     }
 }

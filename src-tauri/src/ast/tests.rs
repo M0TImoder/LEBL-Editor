@@ -215,6 +215,39 @@ fn property_expr_roundtrip() {
     }
 }
 
+#[test]
+fn fstring_roundtrip() {
+    let source = "x = f\"hello {name}\"\n";
+    let program = parse_with(PythonVersion::Py310, source).unwrap();
+    let rendered = program.to_python(RenderConfig {
+        mode: RenderMode::Pretty,
+        reuse_token_ranges: false,
+    });
+    assert_eq!(rendered, source);
+}
+
+#[test]
+fn fstring_lossless_roundtrip() {
+    let source = "msg = f'result: {x + 1}'\n";
+    let program = parse_with(PythonVersion::Py310, source).unwrap();
+    let rendered = program.to_python(RenderConfig {
+        mode: RenderMode::Lossless,
+        reuse_token_ranges: false,
+    });
+    assert_eq!(rendered, source);
+}
+
+#[test]
+fn fstring_multiple_exprs() {
+    let source = "print(f\"{a} and {b}\")\n";
+    let program = parse_with(PythonVersion::Py310, source).unwrap();
+    let rendered = program.to_python(RenderConfig {
+        mode: RenderMode::Pretty,
+        reuse_token_ranges: false,
+    });
+    assert_eq!(rendered, source);
+}
+
 fn generate_expr(seed: u64, depth: u8) -> Expr {
     let mut value = seed;
     let mut next = || {
@@ -256,6 +289,7 @@ fn generate_expr(seed: u64, depth: u8) -> Expr {
                 name: "fn".to_string(),
             })),
             args: vec![generate_expr(next(), depth - 1)],
+            kwargs: vec![],
         }),
     }
 }

@@ -27,6 +27,12 @@ import type {
   unary_op,
   function_def_block,
   set_block,
+  import_name,
+  ir_except_handler,
+  try_block,
+  class_def_block,
+  import_block,
+  fstring_part,
 } from "./types";
 import {
   block_type_assign,
@@ -67,6 +73,15 @@ import {
   block_type_var_set,
   block_type_wait,
   block_type_while,
+  block_type_return,
+  block_type_break,
+  block_type_continue,
+  block_type_aug_assign,
+  block_type_import,
+  block_type_try,
+  block_type_class_def,
+  block_type_slice,
+  block_type_fstring,
 } from "./blockly_config";
 
 let workspace: Blockly.WorkspaceSvg | null = null;
@@ -155,6 +170,41 @@ const collect_max_id_stmt = (stmt: ir_stmt): number => {
       return Math.max(max_id, collect_max_id_expr(stmt.data.expr));
     case "Pass":
     case "Empty":
+      return max_id;
+    case "Return":
+      if (stmt.data.value) {
+        return Math.max(max_id, collect_max_id_expr(stmt.data.value));
+      }
+      return max_id;
+    case "Break":
+    case "Continue":
+      return max_id;
+    case "AugAssign":
+      return Math.max(
+        max_id,
+        collect_max_id_expr(stmt.data.target),
+        collect_max_id_expr(stmt.data.value),
+      );
+    case "Import":
+      return max_id;
+    case "Try":
+      max_id = Math.max(max_id, collect_max_id_block(stmt.data.body));
+      stmt.data.handlers.forEach((handler) => {
+        max_id = Math.max(max_id, handler.meta.id);
+        if (handler.exception_type) {
+          max_id = Math.max(max_id, collect_max_id_expr(handler.exception_type));
+        }
+        max_id = Math.max(max_id, collect_max_id_block(handler.body));
+      });
+      if (stmt.data.finally_body) {
+        max_id = Math.max(max_id, collect_max_id_block(stmt.data.finally_body));
+      }
+      return max_id;
+    case "ClassDef":
+      max_id = Math.max(max_id, collect_max_id_block(stmt.data.body));
+      stmt.data.bases.forEach((base) => {
+        max_id = Math.max(max_id, collect_max_id_expr(base));
+      });
       return max_id;
     default:
       return max_id;
@@ -288,13 +338,34 @@ const collect_max_id_expr = (expression: expr): number => {
       });
       return max_id;
     }
+    case "Slice": {
+      let max_id = expression.data.meta.id;
+      if (expression.data.lower) {
+        max_id = Math.max(max_id, collect_max_id_expr(expression.data.lower));
+      }
+      if (expression.data.upper) {
+        max_id = Math.max(max_id, collect_max_id_expr(expression.data.upper));
+      }
+      if (expression.data.step) {
+        max_id = Math.max(max_id, collect_max_id_expr(expression.data.step));
+      }
+      return max_id;
+    }
+    case "FString": {
+      let max_id = expression.data.meta.id;
+      expression.data.parts.forEach((part) => {
+        if (part.kind === "Expr") {
+          max_id = Math.max(max_id, collect_max_id_expr(part.data));
+        }
+      });
+      return max_id;
+    }
     case "Comprehension": {
       const comp = expression.data;
       if (comp.kind === "dict") {
         const dict = comp.data;
-        let max_id = dict.meta.id;
-        max_id = Math.max(
-          max_id,
+        let max_id = Math.max(
+          dict.meta.id,
           collect_max_id_expr(dict.key),
           collect_max_id_expr(dict.value),
         );
@@ -510,6 +581,80 @@ const create_statement_blocks = (statement: ir_stmt) => {
   }
   if (statement.kind === "Pass") {
     const block = workspace.newBlock(block_type_pass);
+    init_block(block);
+    return { first: block, last: block };
+  }
+  if (statement.kind === "Return") {
+    const block = workspace.newBlock(block_type_return);
+    if (statement.data.value) {
+      attach_expr_input(block, "VALUE", statement.data.value);
+    }
+    init_block(block);
+    return { first: block, last: block };
+  }
+  if (statement.kind === "Break") {
+    const block = workspace.newBlock(block_type_break);
+    init_block(block);
+    return { first: block, last: block };
+  }
+  if (statement.kind === "Continue") {
+    const block = workspace.newBlock(block_type_continue);
+    init_block(block);
+    return { first: block, last: block };
+  }
+  if (statement.kind === "AugAssign") {
+    const block = workspace.newBlock(block_type_aug_assign);
+    attach_expr_input(block, "TARGET", statement.data.target);
+    block.setFieldValue(statement.data.op, "OP");
+    attach_expr_input(block, "VALUE", statement.data.value);
+    init_block(block);
+    return { first: block, last: block };
+  }
+  if (statement.kind === "Import") {
+    const block = workspace.newBlock(block_type_import) as unknown as import_block;
+    block.setFieldValue(statement.data.is_from ? "from" : "import", "KIND");
+    block.setFieldValue(statement.data.module, "MODULE");
+    block.nameCount_ = statement.data.names.length;
+    block.updateShape_();
+    block.setFieldValue(String(statement.data.names.length), "NAME_COUNT");
+    statement.data.names.forEach((name, index) => {
+      const display = name.alias ? `${name.name} as ${name.alias}` : name.name;
+      block.setFieldValue(display, `NAME${index}`);
+    });
+    init_block(block);
+    return { first: block, last: block };
+  }
+  if (statement.kind === "Try") {
+    const block = workspace.newBlock(block_type_try) as unknown as try_block;
+    attach_statement_body(block, "BODY", statement.data.body.statements);
+    block.handlerCount_ = statement.data.handlers.length;
+    block.updateShape_();
+    block.setFieldValue(String(statement.data.handlers.length), "HANDLER_COUNT");
+    statement.data.handlers.forEach((handler, index) => {
+      if (handler.exception_type) {
+        attach_expr_input(block, `EXCEPT_TYPE${index}`, handler.exception_type);
+      }
+      if (handler.name) {
+        block.setFieldValue(handler.name, `EXCEPT_NAME${index}`);
+      }
+      attach_statement_body(block, `EXCEPT_BODY${index}`, handler.body.statements);
+    });
+    if (statement.data.finally_body) {
+      attach_statement_body(block, "FINALLY_BODY", statement.data.finally_body.statements);
+    }
+    init_block(block);
+    return { first: block, last: block };
+  }
+  if (statement.kind === "ClassDef") {
+    const block = workspace.newBlock(block_type_class_def) as unknown as class_def_block;
+    block.setFieldValue(statement.data.name, "NAME");
+    block.baseCount_ = statement.data.bases.length;
+    block.updateShape_();
+    block.setFieldValue(String(statement.data.bases.length), "BASE_COUNT");
+    statement.data.bases.forEach((base, index) => {
+      attach_expr_input(block, `BASE${index}`, base);
+    });
+    attach_statement_body(block, "BODY", statement.data.body.statements);
     init_block(block);
     return { first: block, last: block };
   }
@@ -785,6 +930,32 @@ const create_expr_block = (expression: expr): Blockly.Block | null => {
       init_block(block);
       return block;
     }
+    case "Slice": {
+      const block = workspace.newBlock(block_type_slice);
+      if (expression.data.lower) {
+        attach_expr_input(block, "LOWER", expression.data.lower);
+      }
+      if (expression.data.upper) {
+        attach_expr_input(block, "UPPER", expression.data.upper);
+      }
+      if (expression.data.step) {
+        attach_expr_input(block, "STEP", expression.data.step);
+      }
+      init_block(block);
+      return block;
+    }
+    case "FString": {
+      const block = workspace.newBlock(block_type_fstring);
+      const template = expression.data.parts.map(part => {
+        if (part.kind === "Literal") {
+          return part.data;
+        }
+        return "{...}";
+      }).join("");
+      block.setFieldValue(template, "TEMPLATE");
+      init_block(block);
+      return block;
+    }
     default:
       return null;
   }
@@ -1025,6 +1196,7 @@ const statement_from_block = (block: Blockly.Block): ir_stmt => {
                 data: { meta: make_meta(), name: "sleep" },
               },
               args: [expr_from_input(block, "SECONDS")],
+              kwargs: [],
             },
           },
         },
@@ -1043,6 +1215,7 @@ const statement_from_block = (block: Blockly.Block): ir_stmt => {
                 data: { meta: make_meta(), name: "print" },
               },
               args: [expr_from_input(block, "VALUE")],
+              kwargs: [],
             },
           },
         },
@@ -1081,6 +1254,105 @@ const statement_from_block = (block: Blockly.Block): ir_stmt => {
         kind: "Pass",
         data: { meta: make_meta() },
       };
+    case block_type_return: {
+      const value_block = block.getInputTargetBlock("VALUE");
+      return {
+        kind: "Return",
+        data: {
+          meta: make_meta(),
+          value: value_block ? expr_from_block(value_block) : null,
+        },
+      };
+    }
+    case block_type_break:
+      return {
+        kind: "Break",
+        data: { meta: make_meta() },
+      };
+    case block_type_continue:
+      return {
+        kind: "Continue",
+        data: { meta: make_meta() },
+      };
+    case block_type_aug_assign:
+      return {
+        kind: "AugAssign",
+        data: {
+          meta: make_meta(),
+          target: expr_from_input(block, "TARGET"),
+          op: block.getFieldValue("OP") ?? "plus_assign",
+          value: expr_from_input(block, "VALUE"),
+        },
+      };
+    case block_type_import: {
+      const imp_block = block as unknown as import_block;
+      const kind_value = block.getFieldValue("KIND") ?? "import";
+      const is_from = kind_value === "from";
+      const module_name = block.getFieldValue("MODULE") ?? "module";
+      const name_count = imp_block.nameCount_;
+      const names: import_name[] = [];
+      for (let i = 0; i < name_count; i++) {
+        const raw = (block.getFieldValue(`NAME${i}`) ?? "").trim();
+        if (raw.length > 0) {
+          const parts = raw.split(/\s+as\s+/);
+          names.push({
+            name: parts[0],
+            alias: parts.length > 1 ? parts[1] : null,
+          });
+        }
+      }
+      return {
+        kind: "Import",
+        data: {
+          meta: make_meta(),
+          module: module_name,
+          names,
+          is_from,
+        },
+      };
+    }
+    case block_type_try: {
+      const t_block = block as unknown as try_block;
+      const handler_count = t_block.handlerCount_;
+      const handlers: ir_except_handler[] = [];
+      for (let i = 0; i < handler_count; i++) {
+        const type_block = block.getInputTargetBlock(`EXCEPT_TYPE${i}`);
+        const name_val = block.getFieldValue(`EXCEPT_NAME${i}`) ?? "";
+        handlers.push({
+          meta: make_meta(),
+          exception_type: type_block ? expr_from_block(type_block) : null,
+          name: name_val.trim().length > 0 ? name_val.trim() : null,
+          body: block_from_statements(block.getInputTargetBlock(`EXCEPT_BODY${i}`)),
+        });
+      }
+      const finally_target = block.getInputTargetBlock("FINALLY_BODY");
+      return {
+        kind: "Try",
+        data: {
+          meta: make_meta(),
+          body: block_from_statements(block.getInputTargetBlock("BODY")),
+          handlers,
+          finally_body: finally_target ? block_from_statements(finally_target) : null,
+        },
+      };
+    }
+    case block_type_class_def: {
+      const cls_block = block as unknown as class_def_block;
+      const base_count = cls_block.baseCount_;
+      const bases: expr[] = [];
+      for (let i = 0; i < base_count; i++) {
+        bases.push(expr_from_input(block, `BASE${i}`));
+      }
+      return {
+        kind: "ClassDef",
+        data: {
+          meta: make_meta(),
+          name: block.getFieldValue("NAME") ?? "MyClass",
+          bases,
+          body: block_from_statements(block.getInputTargetBlock("BODY")),
+        },
+      };
+    }
     case block_type_sync_error:
       throw new Error("同期エラーのため変換不可");
     default:
@@ -1272,6 +1544,7 @@ const expr_from_block = (block: Blockly.Block): expr => {
             data: { meta: make_meta(), name: "random" },
           },
           args: [],
+          kwargs: [],
         },
       };
     case block_type_round:
@@ -1284,6 +1557,7 @@ const expr_from_block = (block: Blockly.Block): expr => {
             data: { meta: make_meta(), name: "round" },
           },
           args: [expr_from_input(block, "VALUE")],
+          kwargs: [],
         },
       };
     case block_type_call: {
@@ -1303,6 +1577,7 @@ const expr_from_block = (block: Blockly.Block): expr => {
           meta: make_meta(),
           callee: expr_from_input(block, "CALLEE"),
           args,
+          kwargs: [],
         },
       };
     }
@@ -1479,6 +1754,32 @@ const expr_from_block = (block: Blockly.Block): expr => {
             element,
             fors,
           },
+        },
+      };
+    }
+    case block_type_slice: {
+      const lower_block = block.getInputTargetBlock("LOWER");
+      const upper_block = block.getInputTargetBlock("UPPER");
+      const step_block = block.getInputTargetBlock("STEP");
+      return {
+        kind: "Slice",
+        data: {
+          meta: make_meta(),
+          lower: lower_block ? expr_from_block(lower_block) : null,
+          upper: upper_block ? expr_from_block(upper_block) : null,
+          step: step_block ? expr_from_block(step_block) : null,
+        },
+      };
+    }
+    case block_type_fstring: {
+      const template = block.getFieldValue("TEMPLATE") ?? "";
+      const parts: fstring_part[] = [{ kind: "Literal" as const, data: template }];
+      return {
+        kind: "FString",
+        data: {
+          meta: make_meta(),
+          parts,
+          quote: "double" as const,
         },
       };
     }

@@ -2,12 +2,15 @@ import * as Blockly from "blockly";
 import type {
   boolop_block,
   call_block,
+  class_def_block,
   compare_block,
   comprehension_block,
   dict_block,
   function_def_block,
+  import_block,
   list_block,
   set_block,
+  try_block,
   tuple_block,
 } from "./types";
 
@@ -49,6 +52,16 @@ export const block_type_list = "expr_list";
 export const block_type_dict = "expr_dict";
 export const block_type_set = "expr_set";
 export const block_type_comprehension = "expr_comprehension";
+export const block_type_slice = "expr_slice";
+export const block_type_fstring = "expr_fstring";
+export const block_type_return = "stmt_return";
+export const block_type_break = "stmt_break";
+export const block_type_continue = "stmt_continue";
+export const block_type_aug_assign = "stmt_aug_assign";
+export const block_type_import = "stmt_import";
+export const block_type_try = "stmt_try";
+export const block_type_except = "stmt_except";
+export const block_type_class_def = "stmt_class_def";
 export const expr_output = "Expr";
 export const declared_variables_category_key = "DECLARED_VARIABLES";
 
@@ -166,6 +179,10 @@ export const toolbox = {
         { kind: "block", type: block_type_match },
         { kind: "block", type: block_type_case },
         { kind: "block", type: block_type_wait },
+        { kind: "block", type: block_type_return },
+        { kind: "block", type: block_type_break },
+        { kind: "block", type: block_type_continue },
+        { kind: "block", type: block_type_try },
       ],
     },
     {
@@ -179,7 +196,10 @@ export const toolbox = {
     {
       kind: "category",
       name: "代入",
-      contents: [{ kind: "block", type: block_type_assign }],
+      contents: [
+        { kind: "block", type: block_type_assign },
+        { kind: "block", type: block_type_aug_assign },
+      ],
     },
     {
       kind: "category",
@@ -194,7 +214,15 @@ export const toolbox = {
     {
       kind: "category",
       name: "定義",
-      contents: [{ kind: "block", type: block_type_function_def }],
+      contents: [
+        { kind: "block", type: block_type_function_def },
+        { kind: "block", type: block_type_class_def },
+      ],
+    },
+    {
+      kind: "category",
+      name: "インポート",
+      contents: [{ kind: "block", type: block_type_import }],
     },
     {
       kind: "category",
@@ -227,6 +255,8 @@ export const toolbox = {
         { kind: "block", type: block_type_attribute },
         { kind: "block", type: block_type_subscript },
         { kind: "block", type: block_type_grouped },
+        { kind: "block", type: block_type_slice },
+        { kind: "block", type: block_type_fstring },
       ],
     },
     {
@@ -487,6 +517,8 @@ export const register_blocks = () => {
           ["*", "mul"],
           ["/", "div"],
           ["%", "mod"],
+          ["//", "floor_div"],
+          ["**", "power"],
         ]),
         "op",
       );
@@ -923,6 +955,196 @@ export const register_blocks = () => {
       this.appendValueInput("VALUE").setCheck(expr_output).appendField("group");
       this.setOutput(true, expr_output);
       this.setColour(290);
+    },
+  };
+
+  Blockly.Blocks[block_type_slice] = {
+    init() {
+      this.appendValueInput("LOWER").setCheck(expr_output).appendField("[");
+      this.appendValueInput("UPPER").setCheck(expr_output).appendField(":");
+      this.appendValueInput("STEP").setCheck(expr_output).appendField(":");
+      this.appendDummyInput().appendField("]");
+      this.setOutput(true, expr_output);
+      this.setColour(290);
+    },
+  };
+
+  Blockly.Blocks[block_type_fstring] = {
+    init() {
+      this.appendDummyInput()
+        .appendField("f\"")
+        .appendField(new Blockly.FieldTextInput("text"), "TEMPLATE")
+        .appendField("\"");
+      this.setOutput(true, expr_output);
+      this.setColour(290);
+    },
+  };
+
+  Blockly.Blocks[block_type_return] = {
+    init() {
+      this.appendValueInput("VALUE").setCheck(expr_output).appendField("return");
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(290);
+    },
+  };
+
+  Blockly.Blocks[block_type_break] = {
+    init() {
+      this.appendDummyInput().appendField("break");
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(160);
+    },
+  };
+
+  Blockly.Blocks[block_type_continue] = {
+    init() {
+      this.appendDummyInput().appendField("continue");
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(160);
+    },
+  };
+
+  Blockly.Blocks[block_type_aug_assign] = {
+    init() {
+      this.appendValueInput("TARGET").setCheck(expr_output).appendField("set");
+      this.appendDummyInput().appendField(
+        new Blockly.FieldDropdown([
+          ["+=", "plus_assign"],
+          ["-=", "minus_assign"],
+          ["*=", "star_assign"],
+          ["/=", "slash_assign"],
+          ["%=", "percent_assign"],
+        ]),
+        "OP",
+      );
+      this.appendValueInput("VALUE").setCheck(expr_output);
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(20);
+    },
+  };
+
+  Blockly.Blocks[block_type_import] = {
+    init() {
+      const validator = (value: number | string) => {
+        const count = Math.max(0, Math.floor(Number(value)));
+        const imp_block = this as import_block;
+        imp_block.nameCount_ = count;
+        imp_block.updateShape_();
+        return count;
+      };
+      this.appendDummyInput()
+        .appendField(
+          new Blockly.FieldDropdown([
+            ["import", "import"],
+            ["from", "from"],
+          ]),
+          "KIND",
+        )
+        .appendField(new Blockly.FieldTextInput("module"), "MODULE")
+        .appendField(new Blockly.FieldNumber(0, 0, 10, 1, validator), "NAME_COUNT");
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(65);
+      (this as import_block).nameCount_ = 0;
+      (this as import_block).updateShape_();
+    },
+    updateShape_() {
+      let index = 0;
+      while (this.getInput(`NAME${index}`)) {
+        this.removeInput(`NAME${index}`);
+        index += 1;
+      }
+      for (let name_index = 0; name_index < (this as import_block).nameCount_; name_index += 1) {
+        this.appendDummyInput(`NAME${name_index}`).appendField(
+          new Blockly.FieldTextInput(`name${name_index}`),
+          `NAME${name_index}`,
+        );
+      }
+    },
+  };
+
+  Blockly.Blocks[block_type_try] = {
+    init() {
+      const validator = (value: number | string) => {
+        const count = Math.max(0, Math.floor(Number(value)));
+        const t_block = this as try_block;
+        t_block.handlerCount_ = count;
+        t_block.updateShape_();
+        return count;
+      };
+      this.appendStatementInput("BODY").appendField("try");
+      this.appendDummyInput()
+        .appendField("handlers")
+        .appendField(new Blockly.FieldNumber(1, 0, 5, 1, validator), "HANDLER_COUNT");
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(20);
+      (this as try_block).handlerCount_ = 1;
+      (this as try_block).updateShape_();
+    },
+    updateShape_() {
+      // Remove old handler inputs
+      let index = 0;
+      while (this.getInput(`EXCEPT_TYPE${index}`) || this.getInput(`EXCEPT_BODY${index}`)) {
+        if (this.getInput(`EXCEPT_TYPE${index}`)) this.removeInput(`EXCEPT_TYPE${index}`);
+        if (this.getInput(`EXCEPT_NAME${index}`)) this.removeInput(`EXCEPT_NAME${index}`);
+        if (this.getInput(`EXCEPT_BODY${index}`)) this.removeInput(`EXCEPT_BODY${index}`);
+        index += 1;
+      }
+      if (this.getInput("FINALLY_BODY")) this.removeInput("FINALLY_BODY");
+      // Add handler inputs
+      for (let handler_index = 0; handler_index < (this as try_block).handlerCount_; handler_index += 1) {
+        this.appendValueInput(`EXCEPT_TYPE${handler_index}`)
+          .setCheck(expr_output)
+          .appendField(`except`);
+        this.appendDummyInput(`EXCEPT_NAME${handler_index}`)
+          .appendField("as")
+          .appendField(new Blockly.FieldTextInput(""), `EXCEPT_NAME${handler_index}`);
+        this.appendStatementInput(`EXCEPT_BODY${handler_index}`).appendField("do");
+      }
+      this.appendStatementInput("FINALLY_BODY").appendField("finally");
+    },
+  };
+
+  Blockly.Blocks[block_type_class_def] = {
+    init() {
+      const validator = (value: number | string) => {
+        const count = Math.max(0, Math.floor(Number(value)));
+        const cls_block = this as class_def_block;
+        cls_block.baseCount_ = count;
+        cls_block.updateShape_();
+        return count;
+      };
+      this.appendDummyInput()
+        .appendField("class")
+        .appendField(new Blockly.FieldTextInput("MyClass"), "NAME")
+        .appendField(new Blockly.FieldNumber(0, 0, 5, 1, validator), "BASE_COUNT");
+      this.appendStatementInput("BODY").appendField("do");
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(20);
+      (this as class_def_block).baseCount_ = 0;
+      (this as class_def_block).updateShape_();
+    },
+    updateShape_() {
+      let index = 0;
+      while (this.getInput(`BASE${index}`)) {
+        this.removeInput(`BASE${index}`);
+        index += 1;
+      }
+      for (let base_index = 0; base_index < (this as class_def_block).baseCount_; base_index += 1) {
+        const input = this.appendValueInput(`BASE${base_index}`).setCheck(expr_output);
+        if (base_index === 0) {
+          input.appendField("bases");
+        }
+        if (this.getInput("BODY")) {
+          this.moveInputBefore(`BASE${base_index}`, "BODY");
+        }
+      }
     },
   };
 };

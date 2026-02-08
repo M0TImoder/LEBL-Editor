@@ -79,7 +79,7 @@ impl Lexer {
                     self.lex_string()?;
                 }
                 'a'..='z' | 'A'..='Z' | '_' => {
-                    self.lex_identifier();
+                    self.lex_identifier()?;
                 }
                 '(' => {
                     let start = self.current_position();
@@ -171,27 +171,51 @@ impl Lexer {
                 '+' => {
                     let start = self.current_position();
                     self.advance_char();
-                    self.push_token(TokenKind::Operator(Operator::Plus), start);
+                    if self.consume_char('=') {
+                        self.push_token(TokenKind::Operator(Operator::PlusAssign), start);
+                    } else {
+                        self.push_token(TokenKind::Operator(Operator::Plus), start);
+                    }
                 }
                 '-' => {
                     let start = self.current_position();
                     self.advance_char();
-                    self.push_token(TokenKind::Operator(Operator::Minus), start);
+                    if self.consume_char('=') {
+                        self.push_token(TokenKind::Operator(Operator::MinusAssign), start);
+                    } else {
+                        self.push_token(TokenKind::Operator(Operator::Minus), start);
+                    }
                 }
                 '*' => {
                     let start = self.current_position();
                     self.advance_char();
-                    self.push_token(TokenKind::Operator(Operator::Star), start);
+                    if self.consume_char('*') {
+                        self.push_token(TokenKind::Operator(Operator::Power), start);
+                    } else if self.consume_char('=') {
+                        self.push_token(TokenKind::Operator(Operator::StarAssign), start);
+                    } else {
+                        self.push_token(TokenKind::Operator(Operator::Star), start);
+                    }
                 }
                 '/' => {
                     let start = self.current_position();
                     self.advance_char();
-                    self.push_token(TokenKind::Operator(Operator::Slash), start);
+                    if self.consume_char('/') {
+                        self.push_token(TokenKind::Operator(Operator::FloorDiv), start);
+                    } else if self.consume_char('=') {
+                        self.push_token(TokenKind::Operator(Operator::SlashAssign), start);
+                    } else {
+                        self.push_token(TokenKind::Operator(Operator::Slash), start);
+                    }
                 }
                 '%' => {
                     let start = self.current_position();
                     self.advance_char();
-                    self.push_token(TokenKind::Operator(Operator::Percent), start);
+                    if self.consume_char('=') {
+                        self.push_token(TokenKind::Operator(Operator::PercentAssign), start);
+                    } else {
+                        self.push_token(TokenKind::Operator(Operator::Percent), start);
+                    }
                 }
                 _ => {
                     return Err(self.error(format!("unexpected character '{current}'")));
@@ -321,7 +345,7 @@ impl Lexer {
         Err(self.error("unterminated string"))
     }
 
-    fn lex_identifier(&mut self) {
+    fn lex_identifier(&mut self) -> Result<(), ParseError> {
         let start = self.current_position();
         let mut raw = String::new();
         while let Some(ch) = self.peek_char() {
@@ -330,6 +354,13 @@ impl Lexer {
                 self.advance_char();
             } else {
                 break;
+            }
+        }
+        if raw == "f" {
+            if let Some(q) = self.peek_char() {
+                if q == '\'' || q == '"' {
+                    return self.lex_fstring(start);
+                }
             }
         }
         let kind = match raw.as_str() {
@@ -345,15 +376,111 @@ impl Lexer {
             "match" => TokenKind::Keyword(Keyword::Match),
             "case" => TokenKind::Keyword(Keyword::Case),
             "pass" => TokenKind::Keyword(Keyword::Pass),
+            "return" => TokenKind::Keyword(Keyword::Return),
+            "break" => TokenKind::Keyword(Keyword::Break),
+            "continue" => TokenKind::Keyword(Keyword::Continue),
             "and" => TokenKind::Keyword(Keyword::And),
             "or" => TokenKind::Keyword(Keyword::Or),
             "not" => TokenKind::Keyword(Keyword::Not),
             "True" => TokenKind::Keyword(Keyword::True),
             "False" => TokenKind::Keyword(Keyword::False),
             "None" => TokenKind::Keyword(Keyword::None),
+            "import" => TokenKind::Keyword(Keyword::Import),
+            "from" => TokenKind::Keyword(Keyword::From),
+            "as" => TokenKind::Keyword(Keyword::As),
+            "try" => TokenKind::Keyword(Keyword::Try),
+            "except" => TokenKind::Keyword(Keyword::Except),
+            "finally" => TokenKind::Keyword(Keyword::Finally),
+            "class" => TokenKind::Keyword(Keyword::Class),
             _ => TokenKind::Identifier(raw),
         };
         self.push_token(kind, start);
+        Ok(())
+    }
+
+    fn lex_fstring(&mut self, start: Position) -> Result<(), ParseError> {
+        let quote = self.peek_char().unwrap();
+        let quote_style = if quote == '"' {
+            QuoteStyle::Double
+        } else {
+            QuoteStyle::Single
+        };
+        self.advance_char(); // consume opening quote
+
+        let mut parts = Vec::new();
+        let mut current_literal = String::new();
+
+        while let Some(ch) = self.peek_char() {
+            if ch == '\\' {
+                self.advance_char();
+                if let Some(next) = self.peek_char() {
+                    current_literal.push('\\');
+                    current_literal.push(next);
+                    self.advance_char();
+                }
+                continue;
+            }
+            if ch == quote {
+                self.advance_char(); // consume closing quote
+                if !current_literal.is_empty() {
+                    parts.push(FStringTokenPart::Literal(current_literal));
+                }
+                self.push_token(
+                    TokenKind::FString(FStringLiteral {
+                        parts,
+                        quote: quote_style,
+                    }),
+                    start,
+                );
+                return Ok(());
+            }
+            if ch == '{' {
+                self.advance_char();
+                if self.peek_char() == Some('{') {
+                    self.advance_char();
+                    current_literal.push('{');
+                    continue;
+                }
+                if !current_literal.is_empty() {
+                    parts.push(FStringTokenPart::Literal(std::mem::take(
+                        &mut current_literal,
+                    )));
+                }
+                let mut expr_text = String::new();
+                let mut brace_depth = 1;
+                while let Some(c) = self.peek_char() {
+                    if c == '{' {
+                        brace_depth += 1;
+                    }
+                    if c == '}' {
+                        brace_depth -= 1;
+                        if brace_depth == 0 {
+                            self.advance_char();
+                            break;
+                        }
+                    }
+                    expr_text.push(c);
+                    self.advance_char();
+                }
+                if brace_depth != 0 {
+                    return Err(self.error("unterminated f-string expression"));
+                }
+                parts.push(FStringTokenPart::ExprText(expr_text));
+                continue;
+            }
+            if ch == '}' {
+                self.advance_char();
+                if self.peek_char() == Some('}') {
+                    self.advance_char();
+                    current_literal.push('}');
+                    continue;
+                }
+                return Err(self.error("single '}' in f-string"));
+            }
+            current_literal.push(ch);
+            self.advance_char();
+        }
+        Err(self.error("unterminated f-string"))
     }
 
     fn push_token(&mut self, kind: TokenKind, start: Position) {
