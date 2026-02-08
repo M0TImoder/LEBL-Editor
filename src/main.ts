@@ -268,6 +268,7 @@ type ir_stmt =
   | { kind: "While"; data: ir_while_stmt }
   | { kind: "For"; data: ir_for_stmt }
   | { kind: "Match"; data: ir_match_stmt }
+  | { kind: "FunctionDef"; data: ir_function_def }
   | { kind: "Assign"; data: ir_assign_stmt }
   | { kind: "Expr"; data: ir_expr_stmt }
   | { kind: "Pass"; data: ir_pass_stmt }
@@ -304,6 +305,13 @@ type ir_match_stmt = {
   meta: node_meta;
   subject: expr;
   cases: ir_case_block;
+};
+
+type ir_function_def = {
+  meta: node_meta;
+  name: string;
+  params: string[];
+  body: ir_block;
 };
 
 type ir_assign_stmt = {
@@ -350,6 +358,11 @@ type tuple_block = Blockly.Block & {
   updateShape_: () => void;
 };
 
+type function_def_block = Blockly.Block & {
+  itemCount_: number;
+  updateShape_: () => void;
+};
+
 type boolop_block = Blockly.Block & {
   itemCount_: number;
   updateShape_: () => void;
@@ -388,6 +401,10 @@ const block_type_while = "stmt_while";
 const block_type_for = "stmt_for";
 const block_type_match = "stmt_match";
 const block_type_case = "stmt_case";
+const block_type_event_start = "event_start";
+const block_type_wait = "stmt_wait";
+const block_type_var_set = "stmt_var_set";
+const block_type_function_def = "stmt_function_def";
 const block_type_assign = "stmt_assign";
 const block_type_expr = "stmt_expr";
 const block_type_pass = "stmt_pass";
@@ -402,6 +419,8 @@ const block_type_boolop = "expr_boolop";
 const block_type_compare = "expr_compare";
 const block_type_ifexpr = "expr_ifexpr";
 const block_type_lambda = "expr_lambda";
+const block_type_random = "expr_random";
+const block_type_round = "expr_round";
 const block_type_call = "expr_call";
 const block_type_tuple = "expr_tuple";
 const block_type_attribute = "expr_attribute";
@@ -416,7 +435,6 @@ const expr_output = "Expr";
 const workspace_container_id = "blockly_workspace";
 const local_storage_source_key = "lebl_python_source";
 const local_storage_theme_key = "lebl_theme_mode";
-const code_sync_delay_ms = 180;
 
 let workspace: Blockly.WorkspaceSvg | null = null;
 let code_editor: HTMLTextAreaElement | null = null;
@@ -426,7 +444,6 @@ let save_button: HTMLButtonElement | null = null;
 let load_button: HTMLButtonElement | null = null;
 let run_button: HTMLButtonElement | null = null;
 let is_syncing = false;
-let code_sync_timer: number | undefined;
 let current_theme: theme_mode = "light";
 let next_node_id = 1;
 
@@ -467,6 +484,11 @@ const toolbox = {
   contents: [
     {
       kind: "category",
+      name: "イベント",
+      contents: [{ kind: "block", type: block_type_event_start }],
+    },
+    {
+      kind: "category",
       name: "制御",
       contents: [
         { kind: "block", type: block_type_if },
@@ -474,6 +496,7 @@ const toolbox = {
         { kind: "block", type: block_type_else },
         { kind: "block", type: block_type_match },
         { kind: "block", type: block_type_case },
+        { kind: "block", type: block_type_wait },
       ],
     },
     {
@@ -491,6 +514,16 @@ const toolbox = {
     },
     {
       kind: "category",
+      name: "変数",
+      contents: [{ kind: "block", type: block_type_var_set }],
+    },
+    {
+      kind: "category",
+      name: "定義",
+      contents: [{ kind: "block", type: block_type_function_def }],
+    },
+    {
+      kind: "category",
       name: "式",
       contents: [
         { kind: "block", type: block_type_identifier },
@@ -504,6 +537,8 @@ const toolbox = {
         { kind: "block", type: block_type_compare },
         { kind: "block", type: block_type_ifexpr },
         { kind: "block", type: block_type_lambda },
+        { kind: "block", type: block_type_random },
+        { kind: "block", type: block_type_round },
         { kind: "block", type: block_type_call },
         { kind: "block", type: block_type_tuple },
         { kind: "block", type: block_type_list },
@@ -633,6 +668,11 @@ const collect_max_id_stmt = (stmt: ir_stmt): number => {
       max_id = Math.max(max_id, collect_max_id_expr(stmt.data.subject));
       max_id = Math.max(max_id, collect_max_id_case_block(stmt.data.cases));
       return max_id;
+    case "FunctionDef":
+      return Math.max(
+        max_id,
+        collect_max_id_block(stmt.data.body),
+      );
     case "Assign":
       return Math.max(
         max_id,
@@ -819,6 +859,14 @@ const collect_max_id_expr = (expression: expr): number => {
 };
 
 const register_blocks = () => {
+  Blockly.Blocks[block_type_event_start] = {
+    init() {
+      this.appendDummyInput().appendField("start");
+      this.appendStatementInput("BODY").appendField("do");
+      this.setColour(120);
+    },
+  };
+
   Blockly.Blocks[block_type_if] = {
     init() {
       this.appendValueInput("COND").setCheck(expr_output).appendField("if");
@@ -887,6 +935,65 @@ const register_blocks = () => {
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(60);
+    },
+  };
+
+  Blockly.Blocks[block_type_wait] = {
+    init() {
+      this.appendValueInput("SECONDS").setCheck(expr_output).appendField("wait");
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(160);
+    },
+  };
+
+  Blockly.Blocks[block_type_var_set] = {
+    init() {
+      this.appendDummyInput()
+        .appendField("var")
+        .appendField(new Blockly.FieldTextInput("value"), "name");
+      this.appendValueInput("VALUE").setCheck(expr_output).appendField("=");
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(20);
+    },
+  };
+
+  Blockly.Blocks[block_type_function_def] = {
+    init() {
+      const validator = (value: number | string) => {
+        const count = Math.max(0, Math.floor(Number(value)));
+        const def_block = this as function_def_block;
+        def_block.itemCount_ = count;
+        def_block.updateShape_();
+        return count;
+      };
+      this.appendDummyInput()
+        .appendField("def")
+        .appendField(new Blockly.FieldTextInput("fn"), "name")
+        .appendField(new Blockly.FieldNumber(0, 0, 8, 1, validator), "ARG_COUNT");
+      this.appendStatementInput("BODY").appendField("do");
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(20);
+      (this as function_def_block).itemCount_ = 0;
+      (this as function_def_block).updateShape_();
+    },
+    updateShape_() {
+      let index = 0;
+      while (this.getInput(`PARAM${index}`)) {
+        this.removeInput(`PARAM${index}`);
+        index += 1;
+      }
+      for (let param_index = 0; param_index < (this as function_def_block).itemCount_; param_index += 1) {
+        this.appendDummyInput(`PARAM${param_index}`).appendField(
+          new Blockly.FieldTextInput(`arg${param_index + 1}`),
+          `PARAM${param_index}`,
+        );
+        if (this.getInput("BODY")) {
+          this.moveInputBefore(`PARAM${param_index}`, "BODY");
+        }
+      }
     },
   };
 
@@ -1109,6 +1216,22 @@ const register_blocks = () => {
       this.appendValueInput("BODY").setCheck(expr_output).appendField(":");
       this.setOutput(true, expr_output);
       this.setColour(330);
+    },
+  };
+
+  Blockly.Blocks[block_type_random] = {
+    init() {
+      this.appendDummyInput().appendField("random");
+      this.setOutput(true, expr_output);
+      this.setColour(290);
+    },
+  };
+
+  Blockly.Blocks[block_type_round] = {
+    init() {
+      this.appendValueInput("VALUE").setCheck(expr_output).appendField("round");
+      this.setOutput(true, expr_output);
+      this.setColour(290);
     },
   };
 
@@ -1537,7 +1660,27 @@ const create_statement_blocks = (statement: ir_stmt) => {
     init_block(block);
     return { first: block, last: block };
   }
+  if (statement.kind === "FunctionDef") {
+    const block = workspace.newBlock(block_type_function_def) as unknown as function_def_block;
+    block.setFieldValue(statement.data.name, "name");
+    block.itemCount_ = statement.data.params.length;
+    block.updateShape_();
+    block.setFieldValue(String(statement.data.params.length), "ARG_COUNT");
+    statement.data.params.forEach((param, index) => {
+      block.setFieldValue(param, `PARAM${index}`);
+    });
+    attach_statement_body(block, "BODY", statement.data.body.statements);
+    init_block(block);
+    return { first: block, last: block };
+  }
   if (statement.kind === "Assign") {
+    if (statement.data.target.kind === "Identifier") {
+      const block = workspace.newBlock(block_type_var_set);
+      block.setFieldValue(statement.data.target.data.name, "name");
+      attach_expr_input(block, "VALUE", statement.data.value);
+      init_block(block);
+      return { first: block, last: block };
+    }
     const block = workspace.newBlock(block_type_assign);
     attach_expr_input(block, "TARGET", statement.data.target);
     attach_expr_input(block, "VALUE", statement.data.value);
@@ -1545,6 +1688,18 @@ const create_statement_blocks = (statement: ir_stmt) => {
     return { first: block, last: block };
   }
   if (statement.kind === "Expr") {
+    const wait_expr = statement.data.expr;
+    if (
+      wait_expr.kind === "Call" &&
+      wait_expr.data.callee.kind === "Identifier" &&
+      wait_expr.data.callee.data.name === "sleep" &&
+      wait_expr.data.args.length === 1
+    ) {
+      const block = workspace.newBlock(block_type_wait);
+      attach_expr_input(block, "SECONDS", wait_expr.data.args[0]);
+      init_block(block);
+      return { first: block, last: block };
+    }
     const block = workspace.newBlock(block_type_expr);
     attach_expr_input(block, "EXPR", statement.data.expr);
     init_block(block);
@@ -1697,6 +1852,25 @@ const create_expr_block = (expression: expr): Blockly.Block | null => {
       return block;
     }
     case "Call": {
+      if (
+        expression.data.callee.kind === "Identifier" &&
+        expression.data.callee.data.name === "random" &&
+        expression.data.args.length === 0
+      ) {
+        const block = workspace.newBlock(block_type_random);
+        init_block(block);
+        return block;
+      }
+      if (
+        expression.data.callee.kind === "Identifier" &&
+        expression.data.callee.data.name === "round" &&
+        expression.data.args.length === 1
+      ) {
+        const block = workspace.newBlock(block_type_round);
+        attach_expr_input(block, "VALUE", expression.data.args[0]);
+        init_block(block);
+        return block;
+      }
       const block = workspace.newBlock(block_type_call) as unknown as call_block;
       const args_count = expression.data.args.length;
       block.itemCount_ = args_count;
@@ -1873,6 +2047,28 @@ const ir_from_blocks = (): ir_program => {
     };
   }
   const top_blocks = workspace.getTopBlocks(true);
+  const event_blocks = top_blocks.filter(
+    (block) => block.type === block_type_event_start,
+  );
+  if (event_blocks.length > 1) {
+    throw new Error("startブロックは1つだけ配置");
+  }
+  if (event_blocks.length === 1) {
+    if (top_blocks.length > 1) {
+      throw new Error("startブロック以外のトップレベルは配置不可");
+    }
+    const event_block = event_blocks[0];
+    const statements = statements_from_chain(
+      event_block.getInputTargetBlock("BODY"),
+    );
+    return {
+      meta: make_meta(),
+      indent_width: 4,
+      body: statements,
+      token_store: null,
+      dirty: true,
+    };
+  }
   const sorted = top_blocks.sort(
     (left, right) =>
       left.getRelativeToSurfaceXY().y - right.getRelativeToSurfaceXY().y,
@@ -1987,6 +2183,56 @@ const statement_from_block = (block: Blockly.Block): ir_stmt => {
           meta: make_meta(),
           subject: expr_from_input(block, "SUBJECT"),
           cases: cases_from_chain(block.getInputTargetBlock("CASES")),
+        },
+      };
+    case block_type_function_def: {
+      const def_block = block as unknown as function_def_block;
+      const count = def_block.itemCount_;
+      const params: string[] = [];
+      for (let index = 0; index < count; index += 1) {
+        const name = def_block.getFieldValue(`PARAM${index}`) ?? "";
+        if (name.trim().length > 0) {
+          params.push(name.trim());
+        }
+      }
+      return {
+        kind: "FunctionDef",
+        data: {
+          meta: make_meta(),
+          name: def_block.getFieldValue("name") ?? "fn",
+          params,
+          body: block_from_statements(block.getInputTargetBlock("BODY")),
+        },
+      };
+    }
+    case block_type_wait:
+      return {
+        kind: "Expr",
+        data: {
+          meta: make_meta(),
+          expr: {
+            kind: "Call",
+            data: {
+              meta: make_meta(),
+              callee: {
+                kind: "Identifier",
+                data: { meta: make_meta(), name: "sleep" },
+              },
+              args: [expr_from_input(block, "SECONDS")],
+            },
+          },
+        },
+      };
+    case block_type_var_set:
+      return {
+        kind: "Assign",
+        data: {
+          meta: make_meta(),
+          target: {
+            kind: "Identifier",
+            data: { meta: make_meta(), name: block.getFieldValue("name") ?? "" },
+          },
+          value: expr_from_input(block, "VALUE"),
         },
       };
     case block_type_assign:
@@ -2179,6 +2425,30 @@ const expr_from_block = (block: Blockly.Block): expr => {
         },
       };
     }
+    case block_type_random:
+      return {
+        kind: "Call",
+        data: {
+          meta: make_meta(),
+          callee: {
+            kind: "Identifier",
+            data: { meta: make_meta(), name: "random" },
+          },
+          args: [],
+        },
+      };
+    case block_type_round:
+      return {
+        kind: "Call",
+        data: {
+          meta: make_meta(),
+          callee: {
+            kind: "Identifier",
+            data: { meta: make_meta(), name: "round" },
+          },
+          args: [expr_from_input(block, "VALUE")],
+        },
+      };
     case block_type_call: {
       const call_block = block as unknown as call_block;
       const args: expr[] = [];
@@ -2388,10 +2658,10 @@ const blocks_from_ir = (ir: ir_program) => {
   }
   Blockly.Events.disable();
   workspace.clear();
-  const chain = build_statement_chain(ir.body);
-  if (chain) {
-    (chain as Blockly.BlockSvg).moveBy(24, 24);
-  }
+  const entry_block = workspace.newBlock(block_type_event_start);
+  attach_statement_body(entry_block, "BODY", ir.body);
+  init_block(entry_block);
+  (entry_block as Blockly.BlockSvg).moveBy(24, 24);
   workspace.cleanUp();
   Blockly.Events.enable();
   workspace.render();
@@ -2433,12 +2703,7 @@ const sync_blocks_to_code = async () => {
 };
 
 const schedule_code_sync = (source: string) => {
-  if (code_sync_timer) {
-    window.clearTimeout(code_sync_timer);
-  }
-  code_sync_timer = window.setTimeout(() => {
-    sync_code_to_blocks(source);
-  }, code_sync_delay_ms);
+  sync_code_to_blocks(source);
 };
 
 const load_source_from_storage = () =>

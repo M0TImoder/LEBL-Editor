@@ -45,7 +45,8 @@ struct RunResult {
 #[tauri::command]
 fn run_python(source: String) -> Result<RunResult, String> {
     let python_path = resolve_python_path()?;
-    let run_path = create_run_file(source)?;
+    let prelude = "import time\nfrom time import sleep\nfrom random import random\n";
+    let run_path = create_run_file(format!("{prelude}\n{source}"))?;
     let output = Command::new(python_path)
         .arg(&run_path)
         .output()
@@ -63,16 +64,23 @@ fn run_python(source: String) -> Result<RunResult, String> {
 }
 
 fn resolve_python_path() -> Result<PathBuf, String> {
-    let mut path = std::env::current_dir().map_err(|err| err.to_string())?;
-    if cfg!(windows) {
-        path = path.join(".venv").join("Scripts").join("python.exe");
-    } else {
-        path = path.join(".venv").join("bin").join("python");
+    let current_dir = std::env::current_dir().map_err(|err| err.to_string())?;
+    let mut candidates = vec![current_dir.clone()];
+    if let Some(parent) = current_dir.parent() {
+        candidates.push(parent.to_path_buf());
     }
-    if !path.exists() {
-        return Err("python venv not found: .venv".to_string());
+    for base in &candidates {
+        let mut path = base.clone();
+        if cfg!(windows) {
+            path = path.join(".venv").join("Scripts").join("python.exe");
+        } else {
+            path = path.join(".venv").join("bin").join("python");
+        }
+        if path.exists() {
+            return Ok(path);
+        }
     }
-    Ok(path)
+    Err(format!("python venv not found in {:?}. current dir is {:?}", candidates, current_dir))
 }
 
 fn create_run_file(source: String) -> Result<PathBuf, String> {

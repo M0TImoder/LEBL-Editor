@@ -119,6 +119,7 @@ pub enum Stmt {
     While(WhileStmt),
     For(ForStmt),
     Match(MatchStmt),
+    FunctionDef(FunctionDefStmt),
     Assign(AssignStmt),
     Expr(ExprStmt),
     Pass(PassStmt),
@@ -181,6 +182,15 @@ pub struct MatchCase {
     #[serde(default)]
     pub meta: NodeMeta,
     pub pattern: Pattern,
+    pub body: Block,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionDefStmt {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub name: String,
+    pub params: Vec<String>,
     pub body: Block,
 }
 
@@ -543,6 +553,7 @@ pub enum IrStmt {
     While(IrWhileStmt),
     For(IrForStmt),
     Match(IrMatchStmt),
+    FunctionDef(IrFunctionDefStmt),
     Assign(IrAssignStmt),
     Expr(IrExprStmt),
     Pass(IrPassStmt),
@@ -605,6 +616,15 @@ pub struct IrMatchCase {
     #[serde(default)]
     pub meta: NodeMeta,
     pub pattern: IrPattern,
+    pub body: IrBlock,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrFunctionDefStmt {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub name: String,
+    pub params: Vec<String>,
     pub body: IrBlock,
 }
 
@@ -916,6 +936,7 @@ pub enum Keyword {
     In,
     Is,
     Lambda,
+    Def,
     Match,
     Case,
     Pass,
@@ -1189,6 +1210,7 @@ fn ir_contains_match(stmt: &IrStmt) -> bool {
         }
         IrStmt::While(stmt) => block_has_match(&stmt.body),
         IrStmt::For(stmt) => block_has_match(&stmt.body),
+        IrStmt::FunctionDef(stmt) => block_has_match(&stmt.body),
         IrStmt::Assign(_) | IrStmt::Expr(_) | IrStmt::Pass(_) | IrStmt::Empty(_) => false,
     }
 }
@@ -1242,6 +1264,12 @@ fn stmt_to_ir(stmt: &Stmt) -> IrStmt {
                     })
                     .collect(),
             },
+        }),
+        Stmt::FunctionDef(stmt) => IrStmt::FunctionDef(IrFunctionDefStmt {
+            meta: stmt.meta.clone(),
+            name: stmt.name.clone(),
+            params: stmt.params.clone(),
+            body: block_to_ir(&stmt.body),
         }),
         Stmt::Assign(stmt) => IrStmt::Assign(IrAssignStmt {
             meta: stmt.meta.clone(),
@@ -1313,6 +1341,12 @@ fn stmt_from_ir_with_indent(stmt: &IrStmt, indent_level: usize) -> Stmt {
                     })
                     .collect(),
             },
+        }),
+        IrStmt::FunctionDef(stmt) => Stmt::FunctionDef(FunctionDefStmt {
+            meta: stmt.meta.clone(),
+            name: stmt.name.clone(),
+            params: stmt.params.clone(),
+            body: block_from_ir_with_indent(&stmt.body, indent_level + 1),
         }),
         IrStmt::Assign(stmt) => Stmt::Assign(AssignStmt {
             meta: stmt.meta.clone(),
@@ -2016,6 +2050,7 @@ impl Lexer {
             "in" => TokenKind::Keyword(Keyword::In),
             "is" => TokenKind::Keyword(Keyword::Is),
             "lambda" => TokenKind::Keyword(Keyword::Lambda),
+            "def" => TokenKind::Keyword(Keyword::Def),
             "match" => TokenKind::Keyword(Keyword::Match),
             "case" => TokenKind::Keyword(Keyword::Case),
             "pass" => TokenKind::Keyword(Keyword::Pass),
@@ -2310,6 +2345,7 @@ impl Parser {
             TokenKind::Keyword(Keyword::While) => self.parse_while_stmt(),
             TokenKind::Keyword(Keyword::For) => self.parse_for_stmt(),
             TokenKind::Keyword(Keyword::Match) => self.parse_match_stmt(),
+            TokenKind::Keyword(Keyword::Def) => self.parse_function_def(),
             TokenKind::Keyword(Keyword::Pass) => self.parse_pass_stmt(),
             TokenKind::Keyword(Keyword::Elif) | TokenKind::Keyword(Keyword::Else) => {
                 Err(self.error("elif/else must follow if"))
@@ -2407,6 +2443,36 @@ impl Parser {
             meta,
             target,
             iterable,
+            body,
+        }))
+    }
+
+    fn parse_function_def(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.index;
+        self.expect_keyword(Keyword::Def)?;
+        let name = self.expect_identifier()?;
+        self.expect_tag(TokenTag::LParen)?;
+        let mut params = Vec::new();
+        if !self.check_tag(TokenTag::RParen) {
+            loop {
+                params.push(self.expect_identifier()?);
+                if self.match_tag(TokenTag::Comma) {
+                    if self.check_tag(TokenTag::RParen) {
+                        break;
+                    }
+                    continue;
+                }
+                break;
+            }
+        }
+        self.expect_tag(TokenTag::RParen)?;
+        self.expect_tag(TokenTag::Colon)?;
+        let body = self.parse_block()?;
+        let meta = self.node_meta(start, self.index.saturating_sub(1));
+        Ok(Stmt::FunctionDef(FunctionDefStmt {
+            meta,
+            name,
+            params,
             body,
         }))
     }
@@ -3343,6 +3409,11 @@ fn render_stmt(
             ));
             render_block(&stmt.body, indent_level + 1, indent_width, lines, context);
         }
+        Stmt::FunctionDef(stmt) => {
+            let params = stmt.params.join(", ");
+            lines.push(format!("{prefix}def {}({}):", stmt.name, params));
+            render_block(&stmt.body, indent_level + 1, indent_width, lines, context);
+        }
         Stmt::Match(stmt) => {
             lines.push(format!(
                 "{prefix}match {}:",
@@ -3407,6 +3478,7 @@ fn stmt_meta(stmt: &Stmt) -> &NodeMeta {
         Stmt::While(stmt) => &stmt.meta,
         Stmt::For(stmt) => &stmt.meta,
         Stmt::Match(stmt) => &stmt.meta,
+        Stmt::FunctionDef(stmt) => &stmt.meta,
         Stmt::Assign(stmt) => &stmt.meta,
         Stmt::Expr(stmt) => &stmt.meta,
         Stmt::Pass(stmt) => &stmt.meta,
@@ -3777,6 +3849,13 @@ mod tests {
         let source = "value = (lambda x: x + 1)(1 if flag else 2)\n";
         let program = pretty_roundtrip(source).unwrap();
         assert!(!program.body.is_empty());
+    }
+
+    #[test]
+    fn function_def_roundtrip() {
+        let source = "def add(a, b):\n    pass\n";
+        let program = pretty_roundtrip(source).unwrap();
+        assert_eq!(program.body.len(), 1);
     }
 
     fn expr_eq(left: &Expr, right: &Expr) -> bool {
