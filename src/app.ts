@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import * as Blockly from "blockly";
@@ -10,7 +11,7 @@ import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, HighlightSt
 import { tags } from "@lezer/highlight";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { autocompletion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
-import type { ir_program, run_result, theme_mode } from "./types";
+import type { ir_program, run_result, run_output, theme_mode } from "./types";
 import { t, set_language, get_language, get_easy_mode, set_easy_mode, type Language } from "./i18n";
 import {
   blockly_theme_dark,
@@ -69,6 +70,8 @@ let help_modal_overlay: HTMLElement | null = null;
 let language_toggle_button: HTMLButtonElement | null = null;
 let easy_mode_toggle_button: HTMLButtonElement | null = null;
 let is_syncing = false;
+let is_running = false;
+let stream_unlisten: UnlistenFn | null = null;
 let current_theme: theme_mode = "light";
 let code_sync_timer: ReturnType<typeof setTimeout> | null = null;
 let pending_code_sync: string | null = null;
@@ -303,7 +306,29 @@ const stop_python = async () =>
 
 const set_output = (text: string) => {
   if (output_console) {
-    output_console.textContent = text;
+    output_console.textContent = "";
+    output_console.appendChild(document.createTextNode(text));
+  }
+};
+
+const append_output = (text: string, css_class?: string) => {
+  if (!output_console) return;
+  const span = document.createElement("span");
+  if (css_class) span.className = css_class;
+  span.textContent = text + "\n";
+  output_console.appendChild(span);
+  output_console.scrollTop = output_console.scrollHeight;
+};
+
+const set_running_state = (running: boolean) => {
+  is_running = running;
+  if (run_button) {
+    run_button.disabled = running;
+    run_button.style.opacity = running ? "0.5" : "";
+  }
+  if (stop_button) {
+    stop_button.disabled = !running;
+    stop_button.style.opacity = running ? "" : "0.5";
   }
 };
 
@@ -334,6 +359,7 @@ const ensure_workspace = () => {
   }
   const workspace = Blockly.inject(workspace_container_id, {
     toolbox: get_toolbox(),
+    media: "./media/",
     grid: {
       spacing: 20,
       length: 3,
@@ -463,17 +489,34 @@ const load_source_from_storage = () =>
   localStorage.getItem(local_storage_source_key) ?? default_source_code;
 
 const run_python_code = async () => {
-  if (!cm_editor) {
+  if (!cm_editor || is_running) {
     return;
   }
-  set_output(t("status_running"));
+  set_running_state(true);
+  if (output_console) output_console.textContent = "";
+  append_output(`▶ ${t("status_running")}`);
+
+  // Listen for streaming output events
+  stream_unlisten = await listen<run_output>("python-output", (event) => {
+    const { stream, line } = event.payload;
+    append_output(line, stream === "stderr" ? "output_stderr" : "output_stdout");
+  });
+
   try {
     const result = await run_python(get_editor_value());
-    const combined = [result.stdout, result.stderr].filter(Boolean).join("\n");
-    const text = combined.length > 0 ? combined : t("status_no_output");
-    set_output(text);
+    const elapsed = (result.elapsed_ms / 1000).toFixed(2);
+    const status_line = result.timed_out
+      ? `\n⏱ ${t("status_timeout")} (${elapsed}s)`
+      : `\n✓ ${t("status_finished")} (${elapsed}s, exit code: ${result.status})`;
+    append_output(status_line, result.status !== 0 ? "output_stderr" : "output_status");
   } catch (error) {
-    set_output(`${t("error_run")}: ${String(error)}`);
+    append_output(`${t("error_run")}: ${String(error)}`, "output_stderr");
+  } finally {
+    set_running_state(false);
+    if (stream_unlisten) {
+      stream_unlisten();
+      stream_unlisten = null;
+    }
   }
 };
 

@@ -322,6 +322,19 @@ body {
   white-space: pre-wrap;
 }
 
+.output_stdout {
+  color: inherit;
+}
+
+.output_stderr {
+  color: #e05252;
+}
+
+.output_status {
+  color: var(--app_muted);
+  font-style: italic;
+}
+
 /* Help modal */
 .help_modal_overlay {
   position: fixed;

@@ -529,6 +529,13 @@ export type run_result = {
   stdout: string;
   stderr: string;
   status: number;
+  elapsed_ms: number;
+  timed_out: boolean;
+};
+
+export type run_output = {
+  stream: "stdout" | "stderr";
+  line: string;
 };
 
 export type call_block = Blockly.Block & {
