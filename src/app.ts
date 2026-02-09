@@ -27,7 +27,6 @@ import {
   ir_from_blocks,
   refresh_declared_variable_category,
   set_workspace,
-  show_sync_error_block,
   update_node_counter,
 } from "./blockly_convert";
 
@@ -244,9 +243,10 @@ const highlight_line_field = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field),
 });
 
-const parse_error_line = (error_string: string): number | null => {
-  const match = error_string.match(/line (\d+):/);
-  return match ? parseInt(match[1], 10) : null;
+const parse_error_parts = (error_string: string): { line: number; col: number; message: string } | null => {
+  const match = error_string.match(/line (\d+):(\d+)\s+(.*)/);
+  if (!match) return null;
+  return { line: parseInt(match[1], 10), col: parseInt(match[2], 10), message: match[3] };
 };
 
 const parse_python_to_ir = async (source: string) =>
@@ -257,6 +257,31 @@ const generate_python_from_ir = async (ir: ir_program) =>
     ir,
     renderMode: "Lossless",
   });
+
+const show_sync_error = (error_str: string) => {
+  const overlay = document.getElementById("sync_error_overlay");
+  const blocker = document.getElementById("blockly_blocker");
+  if (!overlay) return;
+  const parts = parse_error_parts(error_str);
+  if (parts) {
+    const detail = t("error_sync_detail")
+      .replace("{line}", String(parts.line))
+      .replace("{col}", String(parts.col))
+      .replace("{message}", parts.message);
+    overlay.innerHTML = `<div class="sync_error_title">${t("error_sync")}</div><div class="sync_error_detail">${detail}</div>`;
+  } else {
+    overlay.innerHTML = `<div class="sync_error_title">${t("error_sync")}</div><div class="sync_error_detail">${error_str}</div>`;
+  }
+  overlay.hidden = false;
+  if (blocker) blocker.hidden = false;
+};
+
+const hide_sync_error = () => {
+  const overlay = document.getElementById("sync_error_overlay");
+  const blocker = document.getElementById("blockly_blocker");
+  if (overlay) overlay.hidden = true;
+  if (blocker) blocker.hidden = true;
+};
 
 const run_python = async (source: string) =>
   invoke<run_result>("run_python", { source });
@@ -331,12 +356,13 @@ const sync_code_to_blocks = async (source: string) => {
     update_node_counter(ir);
     blocks_from_ir(ir);
     set_error_line(null);
+    hide_sync_error();
   } catch (error) {
     const error_str = String(error);
     set_output(`${t("error_sync")}: ${error_str}`);
-    const line = parse_error_line(error_str);
-    set_error_line(line);
-    show_sync_error_block();
+    const parts = parse_error_parts(error_str);
+    set_error_line(parts?.line ?? null);
+    show_sync_error(error_str);
   } finally {
     is_syncing = false;
     if (pending_code_sync !== null) {

@@ -41,7 +41,11 @@
           </section>
           <section class="pane block_pane">
             <div class="pane_header" data-i18n="label_blocks">ブロック</div>
-            <div id="blockly_workspace" class="blockly_workspace"></div>
+            <div class="blockly_wrapper">
+              <div id="sync_error_overlay" class="sync_error_overlay" hidden></div>
+              <div id="blockly_blocker" class="blockly_blocker" hidden></div>
+              <div id="blockly_workspace" class="blockly_workspace"></div>
+            </div>
           </section>
         </div>
         <section class="pane output_pane">
