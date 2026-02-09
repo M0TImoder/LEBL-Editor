@@ -136,6 +136,13 @@ pub enum Stmt {
     Import(ImportStmt),
     Try(TryStmt),
     ClassDef(ClassDefStmt),
+    With(WithStmt),
+    Assert(AssertStmt),
+    Raise(RaiseStmt),
+    Del(DelStmt),
+    Global(GlobalStmt),
+    Nonlocal(NonlocalStmt),
+    AnnAssign(AnnAssignStmt),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -202,8 +209,19 @@ pub struct FunctionDefStmt {
     #[serde(default)]
     pub meta: NodeMeta,
     pub name: String,
-    pub params: Vec<String>,
+    pub params: Vec<FuncParam>,
+    #[serde(default)]
+    pub decorators: Vec<Expr>,
     pub body: Block,
+    #[serde(default)]
+    pub return_type: Option<Expr>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FuncParam {
+    pub name: String,
+    #[serde(default)]
+    pub annotation: Option<Expr>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -212,6 +230,8 @@ pub struct ClassDefStmt {
     pub meta: NodeMeta,
     pub name: String,
     pub bases: Vec<Expr>,
+    #[serde(default)]
+    pub decorators: Vec<Expr>,
     pub body: Block,
 }
 
@@ -302,6 +322,61 @@ pub struct ExceptHandler {
     pub exception_type: Option<Expr>,
     pub name: Option<String>,
     pub body: Block,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WithStmt {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub context: Expr,
+    pub name: Option<String>,
+    pub body: Block,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssertStmt {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub condition: Expr,
+    pub message: Option<Expr>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaiseStmt {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub exception: Option<Expr>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelStmt {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub target: Expr,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GlobalStmt {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NonlocalStmt {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnnAssignStmt {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub target: String,
+    pub annotation: Expr,
+    #[serde(default)]
+    pub value: Option<Expr>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -697,6 +772,13 @@ pub enum IrStmt {
     Import(IrImportStmt),
     Try(IrTryStmt),
     ClassDef(IrClassDefStmt),
+    With(IrWithStmt),
+    Assert(IrAssertStmt),
+    Raise(IrRaiseStmt),
+    Del(IrDelStmt),
+    Global(IrGlobalStmt),
+    Nonlocal(IrNonlocalStmt),
+    AnnAssign(IrAnnAssignStmt),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -763,8 +845,19 @@ pub struct IrFunctionDefStmt {
     #[serde(default)]
     pub meta: NodeMeta,
     pub name: String,
-    pub params: Vec<String>,
+    pub params: Vec<IrFuncParam>,
+    #[serde(default)]
+    pub decorators: Vec<IrExpr>,
     pub body: IrBlock,
+    #[serde(default)]
+    pub return_type: Option<IrExpr>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrFuncParam {
+    pub name: String,
+    #[serde(default)]
+    pub annotation: Option<IrExpr>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -773,6 +866,8 @@ pub struct IrClassDefStmt {
     pub meta: NodeMeta,
     pub name: String,
     pub bases: Vec<IrExpr>,
+    #[serde(default)]
+    pub decorators: Vec<IrExpr>,
     pub body: IrBlock,
 }
 
@@ -857,6 +952,61 @@ pub struct IrExceptHandler {
     pub exception_type: Option<IrExpr>,
     pub name: Option<String>,
     pub body: IrBlock,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrWithStmt {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub context: IrExpr,
+    pub name: Option<String>,
+    pub body: IrBlock,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrAssertStmt {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub condition: IrExpr,
+    pub message: Option<IrExpr>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrRaiseStmt {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub exception: Option<IrExpr>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrDelStmt {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub target: IrExpr,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrGlobalStmt {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrNonlocalStmt {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrAnnAssignStmt {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub target: String,
+    pub annotation: IrExpr,
+    #[serde(default)]
+    pub value: Option<IrExpr>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1194,6 +1344,12 @@ pub enum Keyword {
     Except,
     Finally,
     Class,
+    With,
+    Assert,
+    Raise,
+    Del,
+    Global,
+    Nonlocal,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -1218,6 +1374,8 @@ pub enum Operator {
     PercentAssign,
     FloorDiv,
     Power,
+    At,
+    Arrow,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -1446,7 +1604,8 @@ fn ir_contains_match(stmt: &IrStmt) -> bool {
                     .map(block_has_match)
                     .unwrap_or(false)
         }
-        IrStmt::Assign(_) | IrStmt::AugAssign(_) | IrStmt::Expr(_) | IrStmt::Pass(_) | IrStmt::Return(_) | IrStmt::Break(_) | IrStmt::Continue(_) | IrStmt::Empty(_) | IrStmt::Import(_) => false,
+        IrStmt::Assign(_) | IrStmt::AugAssign(_) | IrStmt::Expr(_) | IrStmt::Pass(_) | IrStmt::Return(_) | IrStmt::Break(_) | IrStmt::Continue(_) | IrStmt::Empty(_) | IrStmt::Import(_) | IrStmt::Assert(_) | IrStmt::Raise(_) | IrStmt::Del(_) | IrStmt::Global(_) | IrStmt::Nonlocal(_) | IrStmt::AnnAssign(_) => false,
+        IrStmt::With(stmt) => block_has_match(&stmt.body),
     }
 }
 
@@ -1503,13 +1662,19 @@ fn stmt_to_ir(stmt: &Stmt) -> IrStmt {
         Stmt::FunctionDef(stmt) => IrStmt::FunctionDef(IrFunctionDefStmt {
             meta: stmt.meta.clone(),
             name: stmt.name.clone(),
-            params: stmt.params.clone(),
+            params: stmt.params.iter().map(|p| IrFuncParam {
+                name: p.name.clone(),
+                annotation: p.annotation.as_ref().map(expr_to_ir),
+            }).collect(),
+            decorators: stmt.decorators.iter().map(expr_to_ir).collect(),
             body: block_to_ir(&stmt.body),
+            return_type: stmt.return_type.as_ref().map(expr_to_ir),
         }),
         Stmt::ClassDef(stmt) => IrStmt::ClassDef(IrClassDefStmt {
             meta: stmt.meta.clone(),
             name: stmt.name.clone(),
             bases: stmt.bases.iter().map(expr_to_ir).collect(),
+            decorators: stmt.decorators.iter().map(expr_to_ir).collect(),
             body: block_to_ir(&stmt.body),
         }),
         Stmt::Assign(stmt) => IrStmt::Assign(IrAssignStmt {
@@ -1564,6 +1729,39 @@ fn stmt_to_ir(stmt: &Stmt) -> IrStmt {
                 })
                 .collect(),
             finally_body: stmt.finally_body.as_ref().map(block_to_ir),
+        }),
+        Stmt::With(stmt) => IrStmt::With(IrWithStmt {
+            meta: stmt.meta.clone(),
+            context: expr_to_ir(&stmt.context),
+            name: stmt.name.clone(),
+            body: block_to_ir(&stmt.body),
+        }),
+        Stmt::Assert(stmt) => IrStmt::Assert(IrAssertStmt {
+            meta: stmt.meta.clone(),
+            condition: expr_to_ir(&stmt.condition),
+            message: stmt.message.as_ref().map(expr_to_ir),
+        }),
+        Stmt::Raise(stmt) => IrStmt::Raise(IrRaiseStmt {
+            meta: stmt.meta.clone(),
+            exception: stmt.exception.as_ref().map(expr_to_ir),
+        }),
+        Stmt::Del(stmt) => IrStmt::Del(IrDelStmt {
+            meta: stmt.meta.clone(),
+            target: expr_to_ir(&stmt.target),
+        }),
+        Stmt::Global(stmt) => IrStmt::Global(IrGlobalStmt {
+            meta: stmt.meta.clone(),
+            names: stmt.names.clone(),
+        }),
+        Stmt::Nonlocal(stmt) => IrStmt::Nonlocal(IrNonlocalStmt {
+            meta: stmt.meta.clone(),
+            names: stmt.names.clone(),
+        }),
+        Stmt::AnnAssign(stmt) => IrStmt::AnnAssign(IrAnnAssignStmt {
+            meta: stmt.meta.clone(),
+            target: stmt.target.clone(),
+            annotation: expr_to_ir(&stmt.annotation),
+            value: stmt.value.as_ref().map(expr_to_ir),
         }),
     }
 }
@@ -1623,13 +1821,19 @@ fn stmt_from_ir_with_indent(stmt: &IrStmt, indent_level: usize) -> Stmt {
         IrStmt::FunctionDef(stmt) => Stmt::FunctionDef(FunctionDefStmt {
             meta: stmt.meta.clone(),
             name: stmt.name.clone(),
-            params: stmt.params.clone(),
+            params: stmt.params.iter().map(|p| FuncParam {
+                name: p.name.clone(),
+                annotation: p.annotation.as_ref().map(expr_from_ir),
+            }).collect(),
+            decorators: stmt.decorators.iter().map(expr_from_ir).collect(),
             body: block_from_ir_with_indent(&stmt.body, indent_level + 1),
+            return_type: stmt.return_type.as_ref().map(expr_from_ir),
         }),
         IrStmt::ClassDef(stmt) => Stmt::ClassDef(ClassDefStmt {
             meta: stmt.meta.clone(),
             name: stmt.name.clone(),
             bases: stmt.bases.iter().map(expr_from_ir).collect(),
+            decorators: stmt.decorators.iter().map(expr_from_ir).collect(),
             body: block_from_ir_with_indent(&stmt.body, indent_level + 1),
         }),
         IrStmt::Assign(stmt) => Stmt::Assign(AssignStmt {
@@ -1687,6 +1891,39 @@ fn stmt_from_ir_with_indent(stmt: &IrStmt, indent_level: usize) -> Stmt {
                 .finally_body
                 .as_ref()
                 .map(|block| block_from_ir_with_indent(block, indent_level + 1)),
+        }),
+        IrStmt::With(stmt) => Stmt::With(WithStmt {
+            meta: stmt.meta.clone(),
+            context: expr_from_ir(&stmt.context),
+            name: stmt.name.clone(),
+            body: block_from_ir_with_indent(&stmt.body, indent_level + 1),
+        }),
+        IrStmt::Assert(stmt) => Stmt::Assert(AssertStmt {
+            meta: stmt.meta.clone(),
+            condition: expr_from_ir(&stmt.condition),
+            message: stmt.message.as_ref().map(expr_from_ir),
+        }),
+        IrStmt::Raise(stmt) => Stmt::Raise(RaiseStmt {
+            meta: stmt.meta.clone(),
+            exception: stmt.exception.as_ref().map(expr_from_ir),
+        }),
+        IrStmt::Del(stmt) => Stmt::Del(DelStmt {
+            meta: stmt.meta.clone(),
+            target: expr_from_ir(&stmt.target),
+        }),
+        IrStmt::Global(stmt) => Stmt::Global(GlobalStmt {
+            meta: stmt.meta.clone(),
+            names: stmt.names.clone(),
+        }),
+        IrStmt::Nonlocal(stmt) => Stmt::Nonlocal(NonlocalStmt {
+            meta: stmt.meta.clone(),
+            names: stmt.names.clone(),
+        }),
+        IrStmt::AnnAssign(stmt) => Stmt::AnnAssign(AnnAssignStmt {
+            meta: stmt.meta.clone(),
+            target: stmt.target.clone(),
+            annotation: expr_from_ir(&stmt.annotation),
+            value: stmt.value.as_ref().map(expr_from_ir),
         }),
     }
 }

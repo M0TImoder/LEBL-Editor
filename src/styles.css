@@ -104,6 +104,17 @@ body {
   background-color: #3f5be6;
 }
 
+.app_button_danger {
+  border-color: transparent;
+  background-color: #e05252;
+  color: #ffffff;
+}
+
+.app_button_danger:hover {
+  border-color: transparent;
+  background-color: #c94444;
+}
+
 .app_button:hover {
   background-color: var(--app_button_hover);
   border-color: var(--app_accent);
@@ -143,18 +154,106 @@ body {
   background-color: var(--app_surface_alt);
 }
 
-.code_editor {
+#tab_bar {
+  display: flex;
+  align-items: center;
+  background-color: var(--app_surface_alt);
+  border-bottom: 1px solid var(--app_border);
+  min-height: 34px;
+  overflow-x: auto;
+}
+
+#tab_list {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.tab_item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  border-right: 1px solid var(--app_border);
+  white-space: nowrap;
+  user-select: none;
+  color: var(--app_muted);
+  transition: background-color 0.15s ease;
+}
+
+.tab_item:hover {
+  background-color: var(--app_button_hover);
+}
+
+.tab_item.active {
+  background-color: var(--app_code_bg);
+  color: var(--app_text);
+  font-weight: 600;
+}
+
+.tab_item.dirty .tab_name::after {
+  content: " *";
+}
+
+.tab_close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: none;
+  color: var(--app_muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0;
+}
+
+.tab_close:hover {
+  background-color: var(--app_border);
+  color: var(--app_text);
+}
+
+.tab_add_btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: none;
+  color: var(--app_muted);
+  font-size: 18px;
+  cursor: pointer;
+  border-radius: 4px;
+  flex-shrink: 0;
+  margin: 0 4px;
+}
+
+.tab_add_btn:hover {
+  background-color: var(--app_button_hover);
+  color: var(--app_text);
+}
+
+.code_editor_container {
   flex: 1;
   min-height: 0;
   width: 100%;
-  border: none;
-  padding: 14px;
+  overflow: hidden;
   background-color: var(--app_code_bg);
-  color: inherit;
-  font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
-  font-size: 14px;
-  resize: none;
-  outline: none;
+}
+
+.code_editor_container .cm-editor {
+  height: 100%;
+}
+
+.code_editor_container .cm-scroller {
+  padding: 8px 0;
 }
 
 .blockly_workspace {
@@ -178,6 +277,79 @@ body {
   font-size: 13px;
   overflow: auto;
   white-space: pre-wrap;
+}
+
+/* Help modal */
+.help_modal_overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.help_modal_overlay[hidden] {
+  display: none;
+}
+
+.help_modal {
+  position: relative;
+  background-color: var(--app_surface);
+  color: var(--app_text);
+  border: 1px solid var(--app_border);
+  border-radius: 12px;
+  padding: 32px;
+  max-width: 600px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.help_modal_close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  border: none;
+  background: none;
+  color: var(--app_muted);
+  font-size: 22px;
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+
+.help_modal_close:hover {
+  background-color: var(--app_button_hover);
+  color: var(--app_text);
+}
+
+.help_modal h2 {
+  margin: 0 0 20px;
+  font-size: 18px;
+}
+
+.help_modal h3 {
+  margin: 16px 0 8px;
+  font-size: 14px;
+}
+
+.help_modal ul {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.help_modal p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.8;
 }
 
 @media (max-width: 980px) {

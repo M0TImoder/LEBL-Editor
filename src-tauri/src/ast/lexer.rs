@@ -182,6 +182,8 @@ impl Lexer {
                     self.advance_char();
                     if self.consume_char('=') {
                         self.push_token(TokenKind::Operator(Operator::MinusAssign), start);
+                    } else if self.consume_char('>') {
+                        self.push_token(TokenKind::Operator(Operator::Arrow), start);
                     } else {
                         self.push_token(TokenKind::Operator(Operator::Minus), start);
                     }
@@ -216,6 +218,11 @@ impl Lexer {
                     } else {
                         self.push_token(TokenKind::Operator(Operator::Percent), start);
                     }
+                }
+                '@' => {
+                    let start = self.current_position();
+                    self.advance_char();
+                    self.push_token(TokenKind::Operator(Operator::At), start);
                 }
                 _ => {
                     return Err(self.error(format!("unexpected character '{current}'")));
@@ -392,6 +399,12 @@ impl Lexer {
             "except" => TokenKind::Keyword(Keyword::Except),
             "finally" => TokenKind::Keyword(Keyword::Finally),
             "class" => TokenKind::Keyword(Keyword::Class),
+            "with" => TokenKind::Keyword(Keyword::With),
+            "assert" => TokenKind::Keyword(Keyword::Assert),
+            "raise" => TokenKind::Keyword(Keyword::Raise),
+            "del" => TokenKind::Keyword(Keyword::Del),
+            "global" => TokenKind::Keyword(Keyword::Global),
+            "nonlocal" => TokenKind::Keyword(Keyword::Nonlocal),
             _ => TokenKind::Identifier(raw),
         };
         self.push_token(kind, start);

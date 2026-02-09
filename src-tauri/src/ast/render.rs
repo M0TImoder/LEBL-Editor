@@ -96,11 +96,27 @@ fn render_stmt(
             render_block(&stmt.body, indent_level + 1, indent_width, lines, context);
         }
         Stmt::FunctionDef(stmt) => {
-            let params = stmt.params.join(", ");
-            lines.push(format!("{prefix}def {}({}):", stmt.name, params));
+            for decorator in &stmt.decorators {
+                lines.push(format!("{prefix}@{}", render_expr(decorator, 0)));
+            }
+            let params = stmt.params.iter().map(|p| {
+                if let Some(ref ann) = p.annotation {
+                    format!("{}: {}", p.name, render_expr(ann, 0))
+                } else {
+                    p.name.clone()
+                }
+            }).collect::<Vec<_>>().join(", ");
+            if let Some(ref ret) = stmt.return_type {
+                lines.push(format!("{prefix}def {}({}) -> {}:", stmt.name, params, render_expr(ret, 0)));
+            } else {
+                lines.push(format!("{prefix}def {}({}):", stmt.name, params));
+            }
             render_block(&stmt.body, indent_level + 1, indent_width, lines, context);
         }
         Stmt::ClassDef(stmt) => {
+            for decorator in &stmt.decorators {
+                lines.push(format!("{prefix}@{}", render_expr(decorator, 0)));
+            }
             if stmt.bases.is_empty() {
                 lines.push(format!("{prefix}class {}:", stmt.name));
             } else {
@@ -210,6 +226,66 @@ fn render_stmt(
                 render_block(finally_body, indent_level + 1, indent_width, lines, context);
             }
         }
+        Stmt::With(stmt) => {
+            if let Some(name) = &stmt.name {
+                lines.push(format!(
+                    "{prefix}with {} as {name}:",
+                    render_expr(&stmt.context, 0)
+                ));
+            } else {
+                lines.push(format!(
+                    "{prefix}with {}:",
+                    render_expr(&stmt.context, 0)
+                ));
+            }
+            render_block(&stmt.body, indent_level + 1, indent_width, lines, context);
+        }
+        Stmt::Assert(stmt) => {
+            if let Some(message) = &stmt.message {
+                lines.push(format!(
+                    "{prefix}assert {}, {}",
+                    render_expr(&stmt.condition, 0),
+                    render_expr(message, 0)
+                ));
+            } else {
+                lines.push(format!(
+                    "{prefix}assert {}",
+                    render_expr(&stmt.condition, 0)
+                ));
+            }
+        }
+        Stmt::Raise(stmt) => {
+            if let Some(exception) = &stmt.exception {
+                lines.push(format!("{prefix}raise {}", render_expr(exception, 0)));
+            } else {
+                lines.push(format!("{prefix}raise"));
+            }
+        }
+        Stmt::Del(stmt) => {
+            lines.push(format!("{prefix}del {}", render_expr(&stmt.target, 0)));
+        }
+        Stmt::Global(stmt) => {
+            lines.push(format!("{prefix}global {}", stmt.names.join(", ")));
+        }
+        Stmt::Nonlocal(stmt) => {
+            lines.push(format!("{prefix}nonlocal {}", stmt.names.join(", ")));
+        }
+        Stmt::AnnAssign(stmt) => {
+            if let Some(ref value) = stmt.value {
+                lines.push(format!(
+                    "{prefix}{}: {} = {}",
+                    stmt.target,
+                    render_expr(&stmt.annotation, 0),
+                    render_expr(value, 0)
+                ));
+            } else {
+                lines.push(format!(
+                    "{prefix}{}: {}",
+                    stmt.target,
+                    render_expr(&stmt.annotation, 0)
+                ));
+            }
+        }
     }
 }
 
@@ -265,6 +341,13 @@ fn stmt_meta(stmt: &Stmt) -> &NodeMeta {
         Stmt::Empty(stmt) => &stmt.meta,
         Stmt::Import(stmt) => &stmt.meta,
         Stmt::Try(stmt) => &stmt.meta,
+        Stmt::With(stmt) => &stmt.meta,
+        Stmt::Assert(stmt) => &stmt.meta,
+        Stmt::Raise(stmt) => &stmt.meta,
+        Stmt::Del(stmt) => &stmt.meta,
+        Stmt::Global(stmt) => &stmt.meta,
+        Stmt::Nonlocal(stmt) => &stmt.meta,
+        Stmt::AnnAssign(stmt) => &stmt.meta,
     }
 }
 

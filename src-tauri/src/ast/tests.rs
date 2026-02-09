@@ -92,6 +92,72 @@ fn function_def_roundtrip() {
     assert_eq!(program.body.len(), 1);
 }
 
+#[test]
+fn ann_assign_roundtrip() {
+    let source = "x: int\n";
+    let program = parse_with(PythonVersion::Py310, source).unwrap();
+    let rendered = program.to_python(RenderConfig {
+        mode: RenderMode::Pretty,
+        reuse_token_ranges: false,
+    });
+    assert_eq!(rendered, source);
+}
+
+#[test]
+fn ann_assign_with_value_roundtrip() {
+    let source = "x: int = 5\n";
+    let program = parse_with(PythonVersion::Py310, source).unwrap();
+    let rendered = program.to_python(RenderConfig {
+        mode: RenderMode::Pretty,
+        reuse_token_ranges: false,
+    });
+    assert_eq!(rendered, source);
+}
+
+#[test]
+fn function_def_with_annotations_roundtrip() {
+    let source = "def add(a: int, b: int) -> int:\n    pass\n";
+    let program = parse_with(PythonVersion::Py310, source).unwrap();
+    let rendered = program.to_python(RenderConfig {
+        mode: RenderMode::Pretty,
+        reuse_token_ranges: false,
+    });
+    assert_eq!(rendered, source);
+}
+
+#[test]
+fn function_def_partial_annotations_roundtrip() {
+    let source = "def greet(name: str, times):\n    pass\n";
+    let program = parse_with(PythonVersion::Py310, source).unwrap();
+    let rendered = program.to_python(RenderConfig {
+        mode: RenderMode::Pretty,
+        reuse_token_ranges: false,
+    });
+    assert_eq!(rendered, source);
+}
+
+#[test]
+fn function_def_return_only_roundtrip() {
+    let source = "def get_value() -> int:\n    pass\n";
+    let program = parse_with(PythonVersion::Py310, source).unwrap();
+    let rendered = program.to_python(RenderConfig {
+        mode: RenderMode::Pretty,
+        reuse_token_ranges: false,
+    });
+    assert_eq!(rendered, source);
+}
+
+#[test]
+fn ann_assign_complex_type_roundtrip() {
+    let source = "data: List[int] = []\n";
+    let program = parse_with(PythonVersion::Py310, source).unwrap();
+    let rendered = program.to_python(RenderConfig {
+        mode: RenderMode::Pretty,
+        reuse_token_ranges: false,
+    });
+    assert_eq!(rendered, source);
+}
+
 fn expr_eq(left: &Expr, right: &Expr) -> bool {
     match (left, right) {
         (Expr::Grouped(left), _) => expr_eq(&left.expr, right),

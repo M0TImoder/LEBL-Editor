@@ -15,6 +15,7 @@ import type {
   ir_block,
   ir_case_block,
   ir_elif_stmt,
+  ir_func_param,
   ir_match_case,
   ir_program,
   ir_stmt,
@@ -82,6 +83,13 @@ import {
   block_type_class_def,
   block_type_slice,
   block_type_fstring,
+  block_type_with_block,
+  block_type_assert_stmt,
+  block_type_raise_stmt,
+  block_type_del_stmt,
+  block_type_global_stmt,
+  block_type_nonlocal_stmt,
+  block_type_ann_assign,
 } from "./blockly_config";
 
 let workspace: Blockly.WorkspaceSvg | null = null;
@@ -90,6 +98,14 @@ let next_node_id = 1;
 export const get_workspace = () => workspace;
 export const set_workspace = (value: Blockly.WorkspaceSvg | null) => {
   workspace = value;
+};
+
+const set_block_span = (block: Blockly.Block, meta: node_meta) => {
+  (block as any).__code_span = meta.span;
+};
+
+export const get_block_span = (block: Blockly.Block): span | null => {
+  return (block as any).__code_span ?? null;
 };
 
 export const refresh_declared_variable_category = () => {
@@ -110,6 +126,32 @@ const make_meta = (): node_meta => ({
   leading_trivia: [],
   trailing_trivia: [],
 });
+
+const render_expr_text = (e: expr): string => {
+  if (e.kind === "Identifier") return e.data.name;
+  if (e.kind === "Attribute") return `${render_expr_text(e.data.value)}.${e.data.attr}`;
+  if (e.kind === "Call") {
+    const callee = render_expr_text(e.data.callee);
+    const args = e.data.args.map((a) => render_expr_text(a)).join(", ");
+    return args ? `${callee}(${args})` : `${callee}()`;
+  }
+  if (e.kind === "Literal") {
+    const lit = e.data.literal;
+    if (lit.kind === "String") return lit.data.value;
+    if (lit.kind === "Number") return lit.data.raw;
+    if (lit.kind === "Bool") return lit.data ? "True" : "False";
+    return "None";
+  }
+  return "?";
+};
+
+const parse_decorators_field = (text: string): expr[] => {
+  if (!text || text.trim() === "") return [];
+  return text.split(",").map((s) => s.trim()).filter((s) => s.length > 0).map((s): expr => ({
+    kind: "Identifier",
+    data: { meta: make_meta(), name: s },
+  }));
+};
 
 export const update_node_counter = (program: ir_program) => {
   const max_id = Math.max(collect_max_id_program(program), next_node_id);
@@ -156,10 +198,22 @@ const collect_max_id_stmt = (stmt: ir_stmt): number => {
       max_id = Math.max(max_id, collect_max_id_case_block(stmt.data.cases));
       return max_id;
     case "FunctionDef":
-      return Math.max(
+      max_id = Math.max(
         max_id,
         collect_max_id_block(stmt.data.body),
       );
+      (stmt.data.decorators ?? []).forEach((d) => {
+        max_id = Math.max(max_id, collect_max_id_expr(d));
+      });
+      stmt.data.params.forEach((p) => {
+        if (p.annotation) {
+          max_id = Math.max(max_id, collect_max_id_expr(p.annotation));
+        }
+      });
+      if (stmt.data.return_type) {
+        max_id = Math.max(max_id, collect_max_id_expr(stmt.data.return_type));
+      }
+      return max_id;
     case "Assign":
       return Math.max(
         max_id,
@@ -205,6 +259,37 @@ const collect_max_id_stmt = (stmt: ir_stmt): number => {
       stmt.data.bases.forEach((base) => {
         max_id = Math.max(max_id, collect_max_id_expr(base));
       });
+      (stmt.data.decorators ?? []).forEach((d) => {
+        max_id = Math.max(max_id, collect_max_id_expr(d));
+      });
+      return max_id;
+    case "With":
+      max_id = Math.max(max_id, collect_max_id_expr(stmt.data.context));
+      stmt.data.body.forEach((s) => {
+        max_id = Math.max(max_id, collect_max_id_stmt(s));
+      });
+      return max_id;
+    case "Assert":
+      max_id = Math.max(max_id, collect_max_id_expr(stmt.data.condition));
+      if (stmt.data.message) {
+        max_id = Math.max(max_id, collect_max_id_expr(stmt.data.message));
+      }
+      return max_id;
+    case "Raise":
+      if (stmt.data.exception) {
+        max_id = Math.max(max_id, collect_max_id_expr(stmt.data.exception));
+      }
+      return max_id;
+    case "Del":
+      return Math.max(max_id, collect_max_id_expr(stmt.data.target));
+    case "Global":
+    case "Nonlocal":
+      return max_id;
+    case "AnnAssign":
+      max_id = Math.max(max_id, collect_max_id_expr(stmt.data.annotation));
+      if (stmt.data.value) {
+        max_id = Math.max(max_id, collect_max_id_expr(stmt.data.value));
+      }
       return max_id;
     default:
       return max_id;
@@ -465,6 +550,14 @@ const build_statement_chain = (body: ir_stmt[]) => {
 };
 
 const create_statement_blocks = (statement: ir_stmt) => {
+  const result = create_statement_blocks_inner(statement);
+  if (result) {
+    set_block_span(result.first, statement.data.meta);
+  }
+  return result;
+};
+
+const create_statement_blocks_inner = (statement: ir_stmt) => {
   if (!workspace) {
     return null;
   }
@@ -526,12 +619,25 @@ const create_statement_blocks = (statement: ir_stmt) => {
   if (statement.kind === "FunctionDef") {
     const block = workspace.newBlock(block_type_function_def) as unknown as function_def_block;
     block.setFieldValue(statement.data.name, "name");
+    const dec_names = (statement.data.decorators ?? []).map((d) => {
+      if (d.kind === "Identifier") return d.data.name;
+      if (d.kind === "Attribute") return render_expr_text(d);
+      if (d.kind === "Call") return render_expr_text(d);
+      return render_expr_text(d);
+    });
+    block.setFieldValue(dec_names.join(", "), "DECORATORS");
     block.itemCount_ = statement.data.params.length;
     block.updateShape_();
     block.setFieldValue(String(statement.data.params.length), "ARG_COUNT");
     statement.data.params.forEach((param, index) => {
-      block.setFieldValue(param, `PARAM${index}`);
+      const param_text = param.annotation
+        ? `${param.name}: ${render_expr_text(param.annotation)}`
+        : param.name;
+      block.setFieldValue(param_text, `PARAM${index}`);
     });
+    if (statement.data.return_type) {
+      block.setFieldValue(render_expr_text(statement.data.return_type), "RETURN_TYPE");
+    }
     attach_statement_body(block, "BODY", statement.data.body.statements);
     init_block(block);
     return { first: block, last: block };
@@ -547,6 +653,16 @@ const create_statement_blocks = (statement: ir_stmt) => {
     const block = workspace.newBlock(block_type_assign);
     attach_expr_input(block, "TARGET", statement.data.target);
     attach_expr_input(block, "VALUE", statement.data.value);
+    init_block(block);
+    return { first: block, last: block };
+  }
+  if (statement.kind === "AnnAssign") {
+    const block = workspace.newBlock(block_type_ann_assign);
+    block.setFieldValue(statement.data.target, "TARGET");
+    block.setFieldValue(render_expr_text(statement.data.annotation), "ANNOTATION");
+    if (statement.data.value) {
+      attach_expr_input(block, "VALUE", statement.data.value);
+    }
     init_block(block);
     return { first: block, last: block };
   }
@@ -648,6 +764,13 @@ const create_statement_blocks = (statement: ir_stmt) => {
   if (statement.kind === "ClassDef") {
     const block = workspace.newBlock(block_type_class_def) as unknown as class_def_block;
     block.setFieldValue(statement.data.name, "NAME");
+    const dec_names = (statement.data.decorators ?? []).map((d) => {
+      if (d.kind === "Identifier") return d.data.name;
+      if (d.kind === "Attribute") return render_expr_text(d);
+      if (d.kind === "Call") return render_expr_text(d);
+      return render_expr_text(d);
+    });
+    block.setFieldValue(dec_names.join(", "), "DECORATORS");
     block.baseCount_ = statement.data.bases.length;
     block.updateShape_();
     block.setFieldValue(String(statement.data.bases.length), "BASE_COUNT");
@@ -655,6 +778,49 @@ const create_statement_blocks = (statement: ir_stmt) => {
       attach_expr_input(block, `BASE${index}`, base);
     });
     attach_statement_body(block, "BODY", statement.data.body.statements);
+    init_block(block);
+    return { first: block, last: block };
+  }
+  if (statement.kind === "With") {
+    const block = workspace.newBlock(block_type_with_block);
+    block.setFieldValue(statement.data.name ?? "", "NAME");
+    attach_expr_input(block, "CONTEXT", statement.data.context);
+    attach_statement_body(block, "BODY", statement.data.body);
+    init_block(block);
+    return { first: block, last: block };
+  }
+  if (statement.kind === "Assert") {
+    const block = workspace.newBlock(block_type_assert_stmt);
+    attach_expr_input(block, "CONDITION", statement.data.condition);
+    if (statement.data.message) {
+      attach_expr_input(block, "MESSAGE", statement.data.message);
+    }
+    init_block(block);
+    return { first: block, last: block };
+  }
+  if (statement.kind === "Raise") {
+    const block = workspace.newBlock(block_type_raise_stmt);
+    if (statement.data.exception) {
+      attach_expr_input(block, "EXCEPTION", statement.data.exception);
+    }
+    init_block(block);
+    return { first: block, last: block };
+  }
+  if (statement.kind === "Del") {
+    const block = workspace.newBlock(block_type_del_stmt);
+    attach_expr_input(block, "TARGET", statement.data.target);
+    init_block(block);
+    return { first: block, last: block };
+  }
+  if (statement.kind === "Global") {
+    const block = workspace.newBlock(block_type_global_stmt);
+    block.setFieldValue(statement.data.names.join(", "), "NAMES");
+    init_block(block);
+    return { first: block, last: block };
+  }
+  if (statement.kind === "Nonlocal") {
+    const block = workspace.newBlock(block_type_nonlocal_stmt);
+    block.setFieldValue(statement.data.names.join(", "), "NAMES");
     init_block(block);
     return { first: block, last: block };
   }
@@ -1011,6 +1177,7 @@ const pattern_to_expr = (pattern_value: pattern): expr => {
 };
 
 export const ir_from_blocks = (): ir_program => {
+  last_ir_json = null;
   if (!workspace) {
     return {
       meta: make_meta(),
@@ -1165,20 +1332,38 @@ const statement_from_block = (block: Blockly.Block): ir_stmt => {
     case block_type_function_def: {
       const def_block = block as unknown as function_def_block;
       const count = def_block.itemCount_;
-      const params: string[] = [];
+      const params: ir_func_param[] = [];
       for (let index = 0; index < count; index += 1) {
-        const name = def_block.getFieldValue(`PARAM${index}`) ?? "";
-        if (name.trim().length > 0) {
-          params.push(name.trim());
+        const raw = (def_block.getFieldValue(`PARAM${index}`) ?? "").trim();
+        if (raw.length > 0) {
+          const colon_index = raw.indexOf(":");
+          if (colon_index >= 0) {
+            const param_name = raw.substring(0, colon_index).trim();
+            const ann_text = raw.substring(colon_index + 1).trim();
+            params.push({
+              name: param_name,
+              annotation: ann_text.length > 0
+                ? { kind: "Identifier", data: { meta: make_meta(), name: ann_text } }
+                : null,
+            });
+          } else {
+            params.push({ name: raw, annotation: null });
+          }
         }
       }
+      const return_type_text = (def_block.getFieldValue("RETURN_TYPE") ?? "").trim();
+      const return_type: expr | null = return_type_text.length > 0
+        ? { kind: "Identifier", data: { meta: make_meta(), name: return_type_text } }
+        : null;
       return {
         kind: "FunctionDef",
         data: {
           meta: make_meta(),
           name: def_block.getFieldValue("name") ?? "fn",
           params,
+          decorators: parse_decorators_field(def_block.getFieldValue("DECORATORS") ?? ""),
           body: block_from_statements(block.getInputTargetBlock("BODY")),
+          return_type,
         },
       };
     }
@@ -1241,6 +1426,19 @@ const statement_from_block = (block: Blockly.Block): ir_stmt => {
           value: expr_from_input(block, "VALUE"),
         },
       };
+    case block_type_ann_assign: {
+      const value_block = block.getInputTargetBlock("VALUE");
+      const ann_text = (block.getFieldValue("ANNOTATION") ?? "int").trim();
+      return {
+        kind: "AnnAssign",
+        data: {
+          meta: make_meta(),
+          target: block.getFieldValue("TARGET") ?? "x",
+          annotation: { kind: "Identifier", data: { meta: make_meta(), name: ann_text } } as expr,
+          value: value_block ? expr_from_input(block, "VALUE") : null,
+        },
+      };
+    }
     case block_type_expr:
       return {
         kind: "Expr",
@@ -1349,7 +1547,69 @@ const statement_from_block = (block: Blockly.Block): ir_stmt => {
           meta: make_meta(),
           name: block.getFieldValue("NAME") ?? "MyClass",
           bases,
+          decorators: parse_decorators_field(cls_block.getFieldValue("DECORATORS") ?? ""),
           body: block_from_statements(block.getInputTargetBlock("BODY")),
+        },
+      };
+    }
+    case block_type_with_block: {
+      const name_val = block.getFieldValue("NAME") as string;
+      return {
+        kind: "With",
+        data: {
+          meta: make_meta(),
+          context: expr_from_input(block, "CONTEXT"),
+          name: name_val && name_val.trim() !== "" ? name_val.trim() : null,
+          body: statements_from_chain(block.getInputTargetBlock("BODY")),
+        },
+      };
+    }
+    case block_type_assert_stmt: {
+      const msg_block = block.getInputTargetBlock("MESSAGE");
+      return {
+        kind: "Assert",
+        data: {
+          meta: make_meta(),
+          condition: expr_from_input(block, "CONDITION"),
+          message: msg_block ? expr_from_block(msg_block) : null,
+        },
+      };
+    }
+    case block_type_raise_stmt: {
+      const exc_block = block.getInputTargetBlock("EXCEPTION");
+      return {
+        kind: "Raise",
+        data: {
+          meta: make_meta(),
+          exception: exc_block ? expr_from_block(exc_block) : null,
+        },
+      };
+    }
+    case block_type_del_stmt:
+      return {
+        kind: "Del",
+        data: {
+          meta: make_meta(),
+          target: expr_from_input(block, "TARGET"),
+        },
+      };
+    case block_type_global_stmt: {
+      const names_str = (block.getFieldValue("NAMES") as string) || "";
+      return {
+        kind: "Global",
+        data: {
+          meta: make_meta(),
+          names: names_str.split(",").map((s: string) => s.trim()).filter((s: string) => s !== ""),
+        },
+      };
+    }
+    case block_type_nonlocal_stmt: {
+      const names_str = (block.getFieldValue("NAMES") as string) || "";
+      return {
+        kind: "Nonlocal",
+        data: {
+          meta: make_meta(),
+          names: names_str.split(",").map((s: string) => s.trim()).filter((s: string) => s !== ""),
         },
       };
     }
@@ -1807,10 +2067,17 @@ const pattern_from_expr = (expression: expr): pattern => {
   throw new Error("patternは識別子かリテラルのみ");
 };
 
+let last_ir_json: string | null = null;
+
 export const blocks_from_ir = (ir: ir_program) => {
   if (!workspace) {
     return;
   }
+  const ir_json = JSON.stringify(ir.body);
+  if (ir_json === last_ir_json) {
+    return;
+  }
+  last_ir_json = ir_json;
   Blockly.Events.disable();
   const metrics = workspace.getMetrics();
   const scroll_x = metrics?.viewLeft ?? 0;

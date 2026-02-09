@@ -62,6 +62,13 @@ export const block_type_import = "stmt_import";
 export const block_type_try = "stmt_try";
 export const block_type_except = "stmt_except";
 export const block_type_class_def = "stmt_class_def";
+export const block_type_with_block = "with_block";
+export const block_type_assert_stmt = "assert_stmt";
+export const block_type_raise_stmt = "raise_stmt";
+export const block_type_del_stmt = "del_stmt";
+export const block_type_global_stmt = "global_stmt";
+export const block_type_nonlocal_stmt = "nonlocal_stmt";
+export const block_type_ann_assign = "stmt_ann_assign";
 export const expr_output = "Expr";
 export const declared_variables_category_key = "DECLARED_VARIABLES";
 
@@ -107,6 +114,13 @@ const collect_declared_variable_names = (active_workspace: Blockly.WorkspaceSvg)
           if (param.length > 0) {
             names.add(param);
           }
+        }
+        break;
+      }
+      case block_type_ann_assign: {
+        const name = normalize_variable_name(block.getFieldValue("TARGET"));
+        if (name.length > 0) {
+          names.add(name);
         }
         break;
       }
@@ -183,6 +197,10 @@ export const toolbox = {
         { kind: "block", type: block_type_break },
         { kind: "block", type: block_type_continue },
         { kind: "block", type: block_type_try },
+        { kind: "block", type: block_type_with_block },
+        { kind: "block", type: block_type_del_stmt },
+        { kind: "block", type: block_type_assert_stmt },
+        { kind: "block", type: block_type_raise_stmt },
       ],
     },
     {
@@ -199,12 +217,17 @@ export const toolbox = {
       contents: [
         { kind: "block", type: block_type_assign },
         { kind: "block", type: block_type_aug_assign },
+        { kind: "block", type: block_type_ann_assign },
       ],
     },
     {
       kind: "category",
       name: "変数",
-      contents: [{ kind: "block", type: block_type_var_set }],
+      contents: [
+        { kind: "block", type: block_type_var_set },
+        { kind: "block", type: block_type_global_stmt },
+        { kind: "block", type: block_type_nonlocal_stmt },
+      ],
     },
     {
       kind: "category",
@@ -390,9 +413,14 @@ export const register_blocks = () => {
         return count;
       };
       this.appendDummyInput()
+        .appendField("@")
+        .appendField(new Blockly.FieldTextInput(""), "DECORATORS");
+      this.appendDummyInput()
         .appendField("def")
         .appendField(new Blockly.FieldTextInput("fn"), "name")
-        .appendField(new Blockly.FieldNumber(0, 0, 8, 1, validator), "ARG_COUNT");
+        .appendField(new Blockly.FieldNumber(0, 0, 8, 1, validator), "ARG_COUNT")
+        .appendField("->")
+        .appendField(new Blockly.FieldTextInput(""), "RETURN_TYPE");
       this.appendStatementInput("BODY").appendField("do");
       this.setPreviousStatement(true);
       this.setNextStatement(true);
@@ -421,6 +449,19 @@ export const register_blocks = () => {
   Blockly.Blocks[block_type_assign] = {
     init() {
       this.appendValueInput("TARGET").setCheck(expr_output).appendField("set");
+      this.appendValueInput("VALUE").setCheck(expr_output).appendField("=");
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(20);
+    },
+  };
+
+  Blockly.Blocks[block_type_ann_assign] = {
+    init() {
+      this.appendDummyInput()
+        .appendField(new Blockly.FieldTextInput("x"), "TARGET")
+        .appendField(":")
+        .appendField(new Blockly.FieldTextInput("int"), "ANNOTATION");
       this.appendValueInput("VALUE").setCheck(expr_output).appendField("=");
       this.setPreviousStatement(true);
       this.setNextStatement(true);
@@ -1120,6 +1161,9 @@ export const register_blocks = () => {
         return count;
       };
       this.appendDummyInput()
+        .appendField("@")
+        .appendField(new Blockly.FieldTextInput(""), "DECORATORS");
+      this.appendDummyInput()
         .appendField("class")
         .appendField(new Blockly.FieldTextInput("MyClass"), "NAME")
         .appendField(new Blockly.FieldNumber(0, 0, 5, 1, validator), "BASE_COUNT");
@@ -1145,6 +1189,69 @@ export const register_blocks = () => {
           this.moveInputBefore(`BASE${base_index}`, "BODY");
         }
       }
+    },
+  };
+
+  Blockly.Blocks[block_type_with_block] = {
+    init() {
+      this.appendValueInput("CONTEXT").setCheck(expr_output).appendField("with");
+      this.appendDummyInput()
+        .appendField("as")
+        .appendField(new Blockly.FieldTextInput(""), "NAME");
+      this.appendStatementInput("BODY").appendField("do");
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(20);
+    },
+  };
+
+  Blockly.Blocks[block_type_assert_stmt] = {
+    init() {
+      this.appendValueInput("CONDITION").setCheck(expr_output).appendField("assert");
+      this.appendValueInput("MESSAGE").setCheck(expr_output).appendField(",");
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(20);
+    },
+  };
+
+  Blockly.Blocks[block_type_raise_stmt] = {
+    init() {
+      this.appendValueInput("EXCEPTION").setCheck(expr_output).appendField("raise");
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(20);
+    },
+  };
+
+  Blockly.Blocks[block_type_del_stmt] = {
+    init() {
+      this.appendValueInput("TARGET").setCheck(expr_output).appendField("del");
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(20);
+    },
+  };
+
+  Blockly.Blocks[block_type_global_stmt] = {
+    init() {
+      this.appendDummyInput()
+        .appendField("global")
+        .appendField(new Blockly.FieldTextInput(""), "NAMES");
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(330);
+    },
+  };
+
+  Blockly.Blocks[block_type_nonlocal_stmt] = {
+    init() {
+      this.appendDummyInput()
+        .appendField("nonlocal")
+        .appendField(new Blockly.FieldTextInput(""), "NAMES");
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour(330);
     },
   };
 };

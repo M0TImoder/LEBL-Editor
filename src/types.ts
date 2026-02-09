@@ -305,7 +305,14 @@ export type ir_stmt =
   | { kind: "AugAssign"; data: ir_aug_assign_stmt }
   | { kind: "Import"; data: ir_import_stmt }
   | { kind: "Try"; data: ir_try_stmt }
-  | { kind: "ClassDef"; data: ir_class_def };
+  | { kind: "ClassDef"; data: ir_class_def }
+  | { kind: "With"; data: ir_with_stmt }
+  | { kind: "Assert"; data: ir_assert_stmt }
+  | { kind: "Raise"; data: ir_raise_stmt }
+  | { kind: "Del"; data: ir_del_stmt }
+  | { kind: "Global"; data: ir_global_stmt }
+  | { kind: "Nonlocal"; data: ir_nonlocal_stmt }
+  | { kind: "AnnAssign"; data: ir_ann_assign_stmt };
 
 export type ir_if_stmt = {
   meta: node_meta;
@@ -343,8 +350,15 @@ export type ir_match_stmt = {
 export type ir_function_def = {
   meta: node_meta;
   name: string;
-  params: string[];
+  params: ir_func_param[];
+  decorators: expr[];
   body: ir_block;
+  return_type: expr | null;
+};
+
+export type ir_func_param = {
+  name: string;
+  annotation: expr | null;
 };
 
 export type ir_assign_stmt = {
@@ -417,7 +431,48 @@ export type ir_class_def = {
   meta: node_meta;
   name: string;
   bases: expr[];
+  decorators: expr[];
   body: ir_block;
+};
+
+export type ir_with_stmt = {
+  meta: node_meta;
+  context: expr;
+  name: string | null;
+  body: ir_stmt[];
+};
+
+export type ir_assert_stmt = {
+  meta: node_meta;
+  condition: expr;
+  message: expr | null;
+};
+
+export type ir_raise_stmt = {
+  meta: node_meta;
+  exception: expr | null;
+};
+
+export type ir_del_stmt = {
+  meta: node_meta;
+  target: expr;
+};
+
+export type ir_global_stmt = {
+  meta: node_meta;
+  names: string[];
+};
+
+export type ir_nonlocal_stmt = {
+  meta: node_meta;
+  names: string[];
+};
+
+export type ir_ann_assign_stmt = {
+  meta: node_meta;
+  target: string;
+  annotation: expr;
+  value: expr | null;
 };
 
 export type ir_program = {

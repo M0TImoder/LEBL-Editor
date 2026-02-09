@@ -2,6 +2,7 @@ mod ast;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[tauri::command]
@@ -42,15 +43,30 @@ struct RunResult {
     status: i32,
 }
 
+static RUNNING_PID: Mutex<Option<u32>> = Mutex::new(None);
+
 #[tauri::command]
 fn run_python(source: String) -> Result<RunResult, String> {
     let python_path = resolve_python_path()?;
     let prelude = "import time\nfrom time import sleep\nfrom random import random\n";
     let run_path = create_run_file(format!("{prelude}\n{source}"))?;
-    let output = Command::new(python_path)
+    let child = Command::new(python_path)
         .arg(&run_path)
-        .output()
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .map_err(|err| format!("python run failed: {err}"))?;
+    {
+        let mut pid = RUNNING_PID.lock().unwrap();
+        *pid = Some(child.id());
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|err| format!("python wait failed: {err}"))?;
+    {
+        let mut pid = RUNNING_PID.lock().unwrap();
+        *pid = None;
+    }
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();
     if let Err(err) = std::fs::remove_file(&run_path) {
@@ -61,6 +77,30 @@ fn run_python(source: String) -> Result<RunResult, String> {
         stderr,
         status: output.status.code().unwrap_or(-1),
     })
+}
+
+#[tauri::command]
+fn stop_python() -> Result<String, String> {
+    let pid = {
+        let mut guard = RUNNING_PID.lock().unwrap();
+        guard.take()
+    };
+    match pid {
+        Some(id) => {
+            #[cfg(windows)]
+            {
+                let _ = Command::new("taskkill")
+                    .args(["/PID", &id.to_string(), "/F", "/T"])
+                    .output();
+            }
+            #[cfg(not(windows))]
+            {
+                unsafe { libc::kill(id as i32, libc::SIGTERM); }
+            }
+            Ok(format!("プロセス {} を停止しました", id))
+        }
+        None => Ok("実行中のプロセスはありません".to_string()),
+    }
 }
 
 fn resolve_python_path() -> Result<PathBuf, String> {
@@ -98,11 +138,14 @@ fn create_run_file(source: String) -> Result<PathBuf, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             get_empty_ir,
             parse_python_to_ir,
             generate_python_from_ir,
-            run_python
+            run_python,
+            stop_python
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

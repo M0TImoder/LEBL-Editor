@@ -88,8 +88,9 @@ impl Parser {
             TokenKind::Keyword(Keyword::While) => self.parse_while_stmt(),
             TokenKind::Keyword(Keyword::For) => self.parse_for_stmt(),
             TokenKind::Keyword(Keyword::Match) => self.parse_match_stmt(),
-            TokenKind::Keyword(Keyword::Def) => self.parse_function_def(),
-            TokenKind::Keyword(Keyword::Class) => self.parse_class_def(),
+            TokenKind::Keyword(Keyword::Def) => self.parse_function_def(Vec::new()),
+            TokenKind::Keyword(Keyword::Class) => self.parse_class_def(Vec::new()),
+            TokenKind::Operator(Operator::At) => self.parse_decorated(),
             TokenKind::Keyword(Keyword::Pass) => self.parse_pass_stmt(),
             TokenKind::Keyword(Keyword::Return) => self.parse_return_stmt(),
             TokenKind::Keyword(Keyword::Break) => self.parse_break_stmt(),
@@ -97,6 +98,12 @@ impl Parser {
             TokenKind::Keyword(Keyword::Import) => self.parse_import_stmt(),
             TokenKind::Keyword(Keyword::From) => self.parse_from_import_stmt(),
             TokenKind::Keyword(Keyword::Try) => self.parse_try_stmt(),
+            TokenKind::Keyword(Keyword::With) => self.parse_with_stmt(),
+            TokenKind::Keyword(Keyword::Assert) => self.parse_assert_stmt(),
+            TokenKind::Keyword(Keyword::Raise) => self.parse_raise_stmt(),
+            TokenKind::Keyword(Keyword::Del) => self.parse_del_stmt(),
+            TokenKind::Keyword(Keyword::Global) => self.parse_global_stmt(),
+            TokenKind::Keyword(Keyword::Nonlocal) => self.parse_nonlocal_stmt(),
             TokenKind::Keyword(Keyword::Elif) | TokenKind::Keyword(Keyword::Else) => {
                 Err(self.error("elif/else must follow if"))
             }
@@ -198,6 +205,25 @@ impl Parser {
     fn parse_simple_stmt(&mut self) -> Result<Stmt, ParseError> {
         let start = self.index;
         let expr = self.parse_expression()?;
+        // Check for annotated assignment: `name: type` or `name: type = value`
+        if let Expr::Identifier(ref ident) = expr {
+            if self.match_tag(TokenTag::Colon) {
+                let annotation = self.parse_expression_no_generator()?;
+                let value = if self.match_operator(Operator::Assign) {
+                    Some(self.parse_expression_no_generator()?)
+                } else {
+                    None
+                };
+                self.expect_line_end()?;
+                let meta = self.node_meta(start, self.index.saturating_sub(1));
+                return Ok(Stmt::AnnAssign(AnnAssignStmt {
+                    meta,
+                    target: ident.name.clone(),
+                    annotation,
+                    value,
+                }));
+            }
+        }
         if self.match_operator(Operator::Assign) {
             let value = self.parse_expression_no_generator()?;
             self.expect_line_end()?;
@@ -290,7 +316,21 @@ impl Parser {
         }))
     }
 
-    fn parse_function_def(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_decorated(&mut self) -> Result<Stmt, ParseError> {
+        let mut decorators = Vec::new();
+        while self.match_operator(Operator::At) {
+            let expr = self.parse_expression()?;
+            self.expect_line_end()?;
+            decorators.push(expr);
+        }
+        match self.peek_kind() {
+            TokenKind::Keyword(Keyword::Def) => self.parse_function_def(decorators),
+            TokenKind::Keyword(Keyword::Class) => self.parse_class_def(decorators),
+            _ => Err(self.error("expected 'def' or 'class' after decorator")),
+        }
+    }
+
+    fn parse_function_def(&mut self, decorators: Vec<Expr>) -> Result<Stmt, ParseError> {
         let start = self.index;
         self.expect_keyword(Keyword::Def)?;
         let name = self.expect_identifier()?;
@@ -298,7 +338,13 @@ impl Parser {
         let mut params = Vec::new();
         if !self.check_tag(TokenTag::RParen) {
             loop {
-                params.push(self.expect_identifier()?);
+                let param_name = self.expect_identifier()?;
+                let annotation = if self.match_tag(TokenTag::Colon) {
+                    Some(self.parse_expression_no_generator()?)
+                } else {
+                    None
+                };
+                params.push(FuncParam { name: param_name, annotation });
                 if self.match_tag(TokenTag::Comma) {
                     if self.check_tag(TokenTag::RParen) {
                         break;
@@ -309,6 +355,11 @@ impl Parser {
             }
         }
         self.expect_tag(TokenTag::RParen)?;
+        let return_type = if self.match_operator(Operator::Arrow) {
+            Some(self.parse_expression_no_generator()?)
+        } else {
+            None
+        };
         self.expect_tag(TokenTag::Colon)?;
         let body = self.parse_block()?;
         let meta = self.node_meta(start, self.index.saturating_sub(1));
@@ -316,11 +367,13 @@ impl Parser {
             meta,
             name,
             params,
+            decorators,
             body,
+            return_type,
         }))
     }
 
-    fn parse_class_def(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_class_def(&mut self, decorators: Vec<Expr>) -> Result<Stmt, ParseError> {
         let start = self.index;
         self.expect_keyword(Keyword::Class)?;
         let name = self.expect_identifier()?;
@@ -347,6 +400,7 @@ impl Parser {
             meta,
             name,
             bases,
+            decorators,
             body,
         }))
     }
@@ -407,6 +461,81 @@ impl Parser {
             handlers,
             finally_body,
         }))
+    }
+
+    fn parse_with_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.index;
+        self.expect_keyword(Keyword::With)?;
+        let context = self.parse_expression()?;
+        let name = if self.match_keyword(Keyword::As) {
+            Some(self.expect_identifier()?)
+        } else {
+            None
+        };
+        self.expect_tag(TokenTag::Colon)?;
+        let body = self.parse_block()?;
+        let meta = self.node_meta(start, self.index.saturating_sub(1));
+        Ok(Stmt::With(WithStmt { meta, context, name, body }))
+    }
+
+    fn parse_assert_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.index;
+        self.expect_keyword(Keyword::Assert)?;
+        let condition = self.parse_expression()?;
+        let message = if self.match_tag(TokenTag::Comma) {
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+        self.expect_line_end()?;
+        let meta = self.node_meta(start, self.index.saturating_sub(1));
+        Ok(Stmt::Assert(AssertStmt { meta, condition, message }))
+    }
+
+    fn parse_raise_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.index;
+        self.expect_keyword(Keyword::Raise)?;
+        let exception = if self.check_tag(TokenTag::Newline) || self.check_tag(TokenTag::Eof) || self.check_tag(TokenTag::Dedent) {
+            None
+        } else {
+            Some(self.parse_expression()?)
+        };
+        self.expect_line_end()?;
+        let meta = self.node_meta(start, self.index.saturating_sub(1));
+        Ok(Stmt::Raise(RaiseStmt { meta, exception }))
+    }
+
+    fn parse_del_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.index;
+        self.expect_keyword(Keyword::Del)?;
+        let target = self.parse_expression()?;
+        self.expect_line_end()?;
+        let meta = self.node_meta(start, self.index.saturating_sub(1));
+        Ok(Stmt::Del(DelStmt { meta, target }))
+    }
+
+    fn parse_global_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.index;
+        self.expect_keyword(Keyword::Global)?;
+        let mut names = vec![self.expect_identifier()?];
+        while self.match_tag(TokenTag::Comma) {
+            names.push(self.expect_identifier()?);
+        }
+        self.expect_line_end()?;
+        let meta = self.node_meta(start, self.index.saturating_sub(1));
+        Ok(Stmt::Global(GlobalStmt { meta, names }))
+    }
+
+    fn parse_nonlocal_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.index;
+        self.expect_keyword(Keyword::Nonlocal)?;
+        let mut names = vec![self.expect_identifier()?];
+        while self.match_tag(TokenTag::Comma) {
+            names.push(self.expect_identifier()?);
+        }
+        self.expect_line_end()?;
+        let meta = self.node_meta(start, self.index.saturating_sub(1));
+        Ok(Stmt::Nonlocal(NonlocalStmt { meta, names }))
     }
 
     fn parse_case_block(&mut self) -> Result<CaseBlock, ParseError> {
