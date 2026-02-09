@@ -72,6 +72,7 @@ let is_syncing = false;
 let current_theme: theme_mode = "light";
 let code_sync_timer: ReturnType<typeof setTimeout> | null = null;
 let pending_code_sync: string | null = null;
+let pending_blocks_sync = false;
 let current_file_path: string | null = null;
 const code_sync_delay_ms = 400;
 
@@ -266,16 +267,23 @@ const show_sync_error = (error_str: string) => {
   const overlay = document.getElementById("sync_error_overlay");
   const blocker = document.getElementById("blockly_blocker");
   if (!overlay) return;
+  overlay.textContent = "";
+  const title_div = document.createElement("div");
+  title_div.className = "sync_error_title";
+  title_div.textContent = t("error_sync");
+  const detail_div = document.createElement("div");
+  detail_div.className = "sync_error_detail";
   const parts = parse_error_parts(error_str);
   if (parts) {
-    const detail = t("error_sync_detail")
+    detail_div.textContent = t("error_sync_detail")
       .replace("{line}", String(parts.line))
       .replace("{col}", String(parts.col))
       .replace("{message}", parts.message);
-    overlay.innerHTML = `<div class="sync_error_title">${t("error_sync")}</div><div class="sync_error_detail">${detail}</div>`;
   } else {
-    overlay.innerHTML = `<div class="sync_error_title">${t("error_sync")}</div><div class="sync_error_detail">${error_str}</div>`;
+    detail_div.textContent = error_str;
   }
+  overlay.appendChild(title_div);
+  overlay.appendChild(detail_div);
   overlay.hidden = false;
   if (blocker) blocker.hidden = false;
 };
@@ -411,6 +419,7 @@ const sync_code_to_blocks = async (source: string) => {
 
 const sync_blocks_to_code = async () => {
   if (is_syncing || !cm_editor) {
+    pending_blocks_sync = true;
     return;
   }
   is_syncing = true;
@@ -426,6 +435,10 @@ const sync_blocks_to_code = async () => {
     set_output(`${t("error_sync")}: ${String(error)}`);
   } finally {
     is_syncing = false;
+    if (pending_blocks_sync) {
+      pending_blocks_sync = false;
+      sync_blocks_to_code();
+    }
   }
 };
 
@@ -672,8 +685,9 @@ export const init_app = () => {
       document.querySelector<HTMLButtonElement>("#easy_mode_toggle");
     const help_modal_close = document.getElementById("help_modal_close");
 
-    const stored_theme =
-      (localStorage.getItem(local_storage_theme_key) as theme_mode | null) ?? null;
+    const raw_theme = localStorage.getItem(local_storage_theme_key);
+    const stored_theme: theme_mode | null =
+      (raw_theme === "light" || raw_theme === "dark") ? raw_theme : null;
     const prefers_dark =
       window.matchMedia &&
       window.matchMedia("(prefers-color-scheme: dark)").matches;

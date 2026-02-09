@@ -574,6 +574,7 @@ export type set_block = Blockly.Block & {
 export type comprehension_block = Blockly.Block & {
   forCount_: number;
   ifCounts_: number[];
+  is_updating_: boolean;
   updateShape_: () => void;
 };
 

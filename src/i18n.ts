@@ -29,6 +29,9 @@ const translations: Record<Language, Record<string, string>> = {
     error_save: "保存エラー",
     error_load: "読み込みエラー",
     error_stop: "停止エラー",
+    error_one_start_block: "startブロックは1つだけ配置",
+    error_no_toplevel_outside_start: "startブロック以外のトップレベルは配置不可",
+    error_pattern_only_id_or_literal: "patternは識別子かリテラルのみ",
 
     // Dialogs
     confirm_close_unsaved: "は未保存の変更があります。閉じますか？",
@@ -106,6 +109,9 @@ const translations: Record<Language, Record<string, string>> = {
     error_save: "Save Error",
     error_load: "Load Error",
     error_stop: "Stop Error",
+    error_one_start_block: "Only one start block is allowed",
+    error_no_toplevel_outside_start: "No top-level blocks allowed outside start block",
+    error_pattern_only_id_or_literal: "Pattern must be an identifier or literal",
 
     // Dialogs
     confirm_close_unsaved: "has unsaved changes. Close anyway?",
@@ -157,8 +163,9 @@ const translations: Record<Language, Record<string, string>> = {
   },
 };
 
+const stored_language = localStorage.getItem("lebl_language");
 let current_language: Language =
-  (localStorage.getItem("lebl_language") as Language) ?? "ja";
+  (stored_language === "ja" || stored_language === "en") ? stored_language : "ja";
 
 let easy_mode: boolean =
   localStorage.getItem("lebl_easy_mode") === "true";

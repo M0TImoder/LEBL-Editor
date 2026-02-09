@@ -955,10 +955,14 @@ export const register_blocks = () => {
       this.setColour(50);
       (this as comprehension_block).forCount_ = 1;
       (this as comprehension_block).ifCounts_ = [0];
+      (this as comprehension_block).is_updating_ = false;
       (this as comprehension_block).updateShape_();
     },
     updateShape_() {
       const comp_block = this as comprehension_block;
+      if (comp_block.is_updating_) return;
+      comp_block.is_updating_ = true;
+      try {
       let index = 0;
       while (this.getInput(`TARGET${index}`)) {
         this.removeInput(`TARGET${index}`);
@@ -988,11 +992,12 @@ export const register_blocks = () => {
           comp_block.updateShape_();
           return count;
         };
+        const if_count = for_index < comp_block.ifCounts_.length ? comp_block.ifCounts_[for_index] : 0;
         this.appendDummyInput(`IFCOUNT${for_index}`)
           .appendField(b("block_if", "if"))
           .appendField(
             new Blockly.FieldNumber(
-              comp_block.ifCounts_[for_index] ?? 0,
+              if_count,
               0,
               4,
               1,
@@ -1000,12 +1005,15 @@ export const register_blocks = () => {
             ),
             `IF_COUNT${for_index}`,
           );
-        for (let if_index = 0; if_index < comp_block.ifCounts_[for_index]; if_index += 1) {
+        for (let if_index = 0; if_index < if_count; if_index += 1) {
           const input = this.appendValueInput(`IF${for_index}_${if_index}`).setCheck(expr_output);
           if (if_index === 0) {
             input.appendField(b("block_cond", "cond"));
           }
         }
+      }
+      } finally {
+        comp_block.is_updating_ = false;
       }
     },
   };

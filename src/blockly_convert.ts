@@ -1,4 +1,5 @@
 import * as Blockly from "blockly";
+import { t } from "./i18n";
 import type {
   binary_op,
   bool_op,
@@ -145,6 +146,36 @@ const make_meta = (): node_meta => ({
   leading_trivia: [],
   trailing_trivia: [],
 });
+
+/** Parse a default value text into the appropriate expr node. */
+const parse_default_value_expr = (text: string): expr => {
+  if (text === "True") {
+    return { kind: "Literal", data: { meta: make_meta(), literal: { kind: "Bool", data: true } } };
+  }
+  if (text === "False") {
+    return { kind: "Literal", data: { meta: make_meta(), literal: { kind: "Bool", data: false } } };
+  }
+  if (text === "None") {
+    return { kind: "Literal", data: { meta: make_meta(), literal: { kind: "None" } } };
+  }
+  if (/^-?\d+(\.\d+)?$/.test(text)) {
+    return { kind: "Literal", data: { meta: make_meta(), literal: { kind: "Number", data: { raw: text } } } };
+  }
+  if ((text.startsWith("'") && text.endsWith("'")) || (text.startsWith('"') && text.endsWith('"'))) {
+    const inner = text.slice(1, -1);
+    return {
+      kind: "Literal",
+      data: {
+        meta: make_meta(),
+        literal: {
+          kind: "String",
+          data: { raw: text, value: inner, quote: text.startsWith("'") ? "single" : "double", escaped: false },
+        },
+      },
+    };
+  }
+  return { kind: "Identifier", data: { meta: make_meta(), name: text } };
+};
 
 const render_expr_text = (e: expr): string => {
   if (e.kind === "Identifier") return e.data.name;
@@ -572,12 +603,13 @@ const attach_statement_body = (
     return;
   }
   const first_block = build_statement_chain(body);
-  if (first_block && parent_block.getInput(input_name)?.connection) {
+  if (first_block) {
+    const connection = parent_block.getInput(input_name)?.connection;
     const first_svg = first_block as Blockly.BlockSvg;
-    if (first_svg.previousConnection) {
-      parent_block
-        .getInput(input_name)
-        ?.connection?.connect(first_svg.previousConnection);
+    if (connection && first_svg.previousConnection) {
+      connection.connect(first_svg.previousConnection);
+    } else {
+      console.warn(`attach_statement_body: connection failed for input "${input_name}"`);
     }
   }
 };
@@ -1429,14 +1461,14 @@ export const ir_from_blocks = (): ir_program => {
     (block) => block.type === block_type_event_start,
   );
   if (event_blocks.length > 1) {
-    throw new Error("startブロックは1つだけ配置");
+    throw new Error(t("error_one_start_block"));
   }
   if (event_blocks.length === 1) {
     const statement_top_blocks = top_blocks.filter(
       (block) => block.type !== block_type_event_start && block.previousConnection !== null,
     );
     if (statement_top_blocks.length > 0) {
-      throw new Error("startブロック以外のトップレベルは配置不可");
+      throw new Error(t("error_no_toplevel_outside_start"));
     }
     const event_block = event_blocks[0];
     const statements = statements_from_chain(
@@ -1594,7 +1626,7 @@ const statement_from_block = (block: Blockly.Block): ir_stmt => {
             const def_text = raw.substring(eq_index + 1).trim();
             raw = raw.substring(0, eq_index).trim();
             if (def_text.length > 0) {
-              default_value = { kind: "Identifier", data: { meta: make_meta(), name: def_text } };
+              default_value = parse_default_value_expr(def_text);
             }
           }
           const colon_index = raw.indexOf(":");
@@ -2397,20 +2429,6 @@ const expr_from_block = (block: Blockly.Block): expr => {
       const key_input = block.getInput("KEY")?.connection?.targetBlock();
       const key =
         key_input != null ? expr_from_block(key_input as Blockly.Block) : null;
-      if (kind === "dict" && !key) {
-        return {
-          kind: "Comprehension",
-          data: {
-            kind: "dict",
-            data: {
-              meta: make_meta(),
-              key: default_identifier_expr(),
-              value: element,
-              fors: [],
-            },
-          },
-        };
-      }
       const fors: comprehension_for[] = [];
       for (let index = 0; index < for_count; index += 1) {
         const target = expr_from_input(block, `TARGET${index}`);
@@ -2439,7 +2457,7 @@ const expr_from_block = (block: Blockly.Block): expr => {
             kind: "dict",
             data: {
               meta: make_meta(),
-              key: key as expr,
+              key: key ?? default_identifier_expr(),
               value: element,
               fors,
             },
@@ -2540,7 +2558,7 @@ const pattern_from_expr = (expression: expr): pattern => {
       data: { meta: make_meta(), literal: expression.data.literal },
     };
   }
-  throw new Error("patternは識別子かリテラルのみ");
+  throw new Error(t("error_pattern_only_id_or_literal"));
 };
 
 let last_ir_json: string | null = null;
@@ -2553,7 +2571,7 @@ export const blocks_from_ir = (ir: ir_program) => {
   if (!workspace) {
     return;
   }
-  const ir_json = JSON.stringify(ir.body);
+  const ir_json = JSON.stringify([ir.body, ir.indent_width]);
   if (ir_json === last_ir_json) {
     return;
   }
