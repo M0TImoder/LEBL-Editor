@@ -18,6 +18,9 @@ import type {
   zip_block,
 } from "./types";
 
+/** Return easy-mode label if active, otherwise the original keyword. */
+const b = (key: string, fallback: string): string => t(key) !== key ? t(key) : fallback;
+
 export const block_type_if = "stmt_if";
 export const block_type_elif = "stmt_elif";
 export const block_type_else = "stmt_else";
@@ -90,6 +93,7 @@ export const block_type_isinstance = "expr_isinstance";
 export const block_type_type_check = "expr_type_check";
 export const expr_output = "Expr";
 export const declared_variables_category_key = "DECLARED_VARIABLES";
+export const declared_functions_category_key = "DECLARED_FUNCTIONS";
 
 const normalize_variable_name = (value: string | null | undefined) =>
   (value ?? "").trim();
@@ -176,6 +180,34 @@ export const build_declared_variable_category = (active_workspace: Blockly.Works
     kind: "block",
     type: block_type_identifier,
     fields: { name },
+  }));
+};
+
+const collect_declared_function_info = (active_workspace: Blockly.WorkspaceSvg) => {
+  const funcs: { name: string; param_count: number }[] = [];
+  const seen = new Set<string>();
+  active_workspace.getAllBlocks(false).forEach((block) => {
+    if (block.type === block_type_function_def) {
+      const name = normalize_variable_name(block.getFieldValue("name"));
+      if (name.length > 0 && !seen.has(name)) {
+        seen.add(name);
+        const param_count = (block as unknown as function_def_block).itemCount_ ?? 0;
+        funcs.push({ name, param_count });
+      }
+    }
+  });
+  return funcs.sort((a, b_item) => a.name.localeCompare(b_item.name));
+};
+
+export const build_declared_function_category = (active_workspace: Blockly.WorkspaceSvg) => {
+  const funcs = collect_declared_function_info(active_workspace);
+  if (funcs.length === 0) {
+    return [{ kind: "label", text: t("msg_no_declared_funcs") }];
+  }
+  return funcs.map((fn) => ({
+    kind: "block",
+    type: block_type_call,
+    fields: { NAME: fn.name, ARG_COUNT: fn.param_count },
   }));
 };
 
@@ -287,6 +319,12 @@ export const get_toolbox = () => ({
     },
     {
       kind: "category",
+      name: t("toolbox_declared_funcs"),
+      colour: "290",
+      custom: declared_functions_category_key,
+    },
+    {
+      kind: "category",
       name: t("toolbox_imports"),
       colour: "160",
       contents: [{ kind: "block", type: block_type_import }],
@@ -365,16 +403,16 @@ export const get_toolbox = () => ({
 export const register_blocks = () => {
   Blockly.Blocks[block_type_event_start] = {
     init() {
-      this.appendDummyInput().appendField("start");
-      this.appendStatementInput("BODY").appendField("do");
+      this.appendDummyInput().appendField(b("block_start", "start"));
+      this.appendStatementInput("BODY").appendField(b("block_do", "do"));
       this.setColour(230);
     },
   };
 
   Blockly.Blocks[block_type_if] = {
     init() {
-      this.appendValueInput("COND").setCheck(expr_output).appendField("if");
-      this.appendStatementInput("BODY").appendField("do");
+      this.appendValueInput("COND").setCheck(expr_output).appendField(b("block_if", "if"));
+      this.appendStatementInput("BODY").appendField(b("block_do", "do"));
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(210);
@@ -383,8 +421,8 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_elif] = {
     init() {
-      this.appendValueInput("COND").setCheck(expr_output).appendField("elif");
-      this.appendStatementInput("BODY").appendField("do");
+      this.appendValueInput("COND").setCheck(expr_output).appendField(b("block_elif", "elif"));
+      this.appendStatementInput("BODY").appendField(b("block_do", "do"));
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(210);
@@ -393,8 +431,8 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_else] = {
     init() {
-      this.appendDummyInput().appendField("else");
-      this.appendStatementInput("BODY").appendField("do");
+      this.appendDummyInput().appendField(b("block_else", "else"));
+      this.appendStatementInput("BODY").appendField(b("block_do", "do"));
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(210);
@@ -403,9 +441,9 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_while] = {
     init() {
-      this.appendValueInput("COND").setCheck(expr_output).appendField("while");
-      this.appendStatementInput("BODY").appendField("do");
-      this.appendStatementInput("ELSE_BODY").appendField("else");
+      this.appendValueInput("COND").setCheck(expr_output).appendField(b("block_while", "while"));
+      this.appendStatementInput("BODY").appendField(b("block_do", "do"));
+      this.appendStatementInput("ELSE_BODY").appendField(b("block_while_else", "else"));
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(120);
@@ -414,11 +452,11 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_for] = {
     init() {
-      this.appendValueInput("TARGET").setCheck(expr_output).appendField("for");
-      this.appendValueInput("ITER").setCheck(expr_output).appendField("in");
-      this.appendDummyInput().appendField("async").appendField(new Blockly.FieldCheckbox("FALSE"), "IS_ASYNC");
-      this.appendStatementInput("BODY").appendField("do");
-      this.appendStatementInput("ELSE_BODY").appendField("else");
+      this.appendValueInput("TARGET").setCheck(expr_output).appendField(b("block_for", "for"));
+      this.appendValueInput("ITER").setCheck(expr_output).appendField(b("block_for_in", "in"));
+      this.appendDummyInput().appendField(b("block_async", "async")).appendField(new Blockly.FieldCheckbox("FALSE"), "IS_ASYNC");
+      this.appendStatementInput("BODY").appendField(b("block_do", "do"));
+      this.appendStatementInput("ELSE_BODY").appendField(b("block_for_else", "else"));
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(120);
@@ -427,8 +465,8 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_match] = {
     init() {
-      this.appendValueInput("SUBJECT").setCheck(expr_output).appendField("match");
-      this.appendStatementInput("CASES").appendField("case");
+      this.appendValueInput("SUBJECT").setCheck(expr_output).appendField(b("block_match", "match"));
+      this.appendStatementInput("CASES").appendField(b("block_case", "case"));
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(210);
@@ -437,8 +475,8 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_case] = {
     init() {
-      this.appendValueInput("PATTERN").setCheck(expr_output).appendField("case");
-      this.appendStatementInput("BODY").appendField("do");
+      this.appendValueInput("PATTERN").setCheck(expr_output).appendField(b("block_case", "case"));
+      this.appendStatementInput("BODY").appendField(b("block_do", "do"));
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(210);
@@ -447,7 +485,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_wait] = {
     init() {
-      this.appendValueInput("SECONDS").setCheck(expr_output).appendField("wait");
+      this.appendValueInput("SECONDS").setCheck(expr_output).appendField(b("block_wait", "wait"));
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(210);
@@ -456,7 +494,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_print] = {
     init() {
-      this.appendValueInput("VALUE").setCheck(expr_output).appendField("print");
+      this.appendValueInput("VALUE").setCheck(expr_output).appendField(b("block_print", "print"));
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(180);
@@ -466,7 +504,7 @@ export const register_blocks = () => {
   Blockly.Blocks[block_type_var_set] = {
     init() {
       this.appendDummyInput()
-        .appendField("var")
+        .appendField(b("block_var_set", "var"))
         .appendField(new Blockly.FieldTextInput("value"), "name");
       this.appendValueInput("VALUE").setCheck(expr_output).appendField("=");
       this.setPreviousStatement(true);
@@ -488,13 +526,13 @@ export const register_blocks = () => {
         .appendField("@")
         .appendField(new Blockly.FieldTextInput(""), "DECORATORS");
       this.appendDummyInput()
-        .appendField("def")
+        .appendField(b("block_def", "def"))
         .appendField(new Blockly.FieldTextInput("fn"), "name")
         .appendField(new Blockly.FieldNumber(0, 0, 8, 1, validator), "ARG_COUNT")
         .appendField("->")
         .appendField(new Blockly.FieldTextInput(""), "RETURN_TYPE");
-      this.appendDummyInput().appendField("async").appendField(new Blockly.FieldCheckbox("FALSE"), "IS_ASYNC");
-      this.appendStatementInput("BODY").appendField("do");
+      this.appendDummyInput().appendField(b("block_async", "async")).appendField(new Blockly.FieldCheckbox("FALSE"), "IS_ASYNC");
+      this.appendStatementInput("BODY").appendField(b("block_do", "do"));
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(290);
@@ -521,7 +559,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_assign] = {
     init() {
-      this.appendValueInput("TARGET").setCheck(expr_output).appendField("set");
+      this.appendValueInput("TARGET").setCheck(expr_output).appendField(b("block_assign_set", "set"));
       this.appendValueInput("VALUE").setCheck(expr_output).appendField("=");
       this.setPreviousStatement(true);
       this.setNextStatement(true);
@@ -544,7 +582,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_expr] = {
     init() {
-      this.appendValueInput("EXPR").setCheck(expr_output).appendField("expr");
+      this.appendValueInput("EXPR").setCheck(expr_output).appendField(b("block_element", "expr"));
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(180);
@@ -553,7 +591,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_pass] = {
     init() {
-      this.appendDummyInput().appendField("pass");
+      this.appendDummyInput().appendField(b("block_pass", "pass"));
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(230);
@@ -570,7 +608,7 @@ export const register_blocks = () => {
   Blockly.Blocks[block_type_identifier] = {
     init() {
       this.appendDummyInput()
-        .appendField("id")
+        .appendField(b("block_id", "id"))
         .appendField(new Blockly.FieldTextInput("value"), "name");
       this.setOutput(true, expr_output);
       this.setColour(330);
@@ -580,7 +618,7 @@ export const register_blocks = () => {
   Blockly.Blocks[block_type_number] = {
     init() {
       this.appendDummyInput()
-        .appendField("num")
+        .appendField(b("block_num", "num"))
         .appendField(new Blockly.FieldTextInput("0"), "value");
       this.setOutput(true, expr_output);
       this.setColour(60);
@@ -590,7 +628,7 @@ export const register_blocks = () => {
   Blockly.Blocks[block_type_string] = {
     init() {
       this.appendDummyInput()
-        .appendField("str")
+        .appendField(b("block_str", "str"))
         .appendField(new Blockly.FieldTextInput("text"), "value");
       this.setOutput(true, expr_output);
       this.setColour(60);
@@ -600,7 +638,7 @@ export const register_blocks = () => {
   Blockly.Blocks[block_type_bool] = {
     init() {
       this.appendDummyInput()
-        .appendField("bool")
+        .appendField(b("block_bool", "bool"))
         .appendField(
           new Blockly.FieldDropdown([
             ["True", "true"],
@@ -615,7 +653,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_none] = {
     init() {
-      this.appendDummyInput().appendField("None");
+      this.appendDummyInput().appendField(b("block_none", "None"));
       this.setOutput(true, expr_output);
       this.setColour(60);
     },
@@ -673,7 +711,7 @@ export const register_blocks = () => {
         return count;
       };
       this.appendDummyInput()
-        .appendField("boolop")
+        .appendField(b("block_boolop", "boolop"))
         .appendField(
           new Blockly.FieldDropdown([
             ["and", "and"],
@@ -711,7 +749,7 @@ export const register_blocks = () => {
         compare_block.updateShape_();
         return count;
       };
-      this.appendValueInput("LEFT").setCheck(expr_output).appendField("compare");
+      this.appendValueInput("LEFT").setCheck(expr_output).appendField(b("block_compare", "compare"));
       this.appendDummyInput().appendField(new Blockly.FieldNumber(1, 1, 6, 1, validator), "COUNT");
       this.setOutput(true, expr_output);
       this.setColour(230);
@@ -750,9 +788,9 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_ifexpr] = {
     init() {
-      this.appendValueInput("BODY").setCheck(expr_output).appendField("ifexpr");
-      this.appendValueInput("COND").setCheck(expr_output).appendField("if");
-      this.appendValueInput("ELSE").setCheck(expr_output).appendField("else");
+      this.appendValueInput("BODY").setCheck(expr_output).appendField(b("block_ifexpr", "ifexpr"));
+      this.appendValueInput("COND").setCheck(expr_output).appendField(b("block_if", "if"));
+      this.appendValueInput("ELSE").setCheck(expr_output).appendField(b("block_else", "else"));
       this.setOutput(true, expr_output);
       this.setColour(210);
     },
@@ -761,7 +799,7 @@ export const register_blocks = () => {
   Blockly.Blocks[block_type_lambda] = {
     init() {
       this.appendDummyInput()
-        .appendField("lambda")
+        .appendField(b("block_lambda", "lambda"))
         .appendField(new Blockly.FieldTextInput("x"), "params");
       this.appendValueInput("BODY").setCheck(expr_output).appendField(":");
       this.setOutput(true, expr_output);
@@ -795,7 +833,7 @@ export const register_blocks = () => {
         return count;
       };
       this.appendDummyInput()
-        .appendField("list")
+        .appendField(b("block_list", "list"))
         .appendField(new Blockly.FieldNumber(0, 0, 8, 1, validator), "COUNT");
       this.setOutput(true, expr_output);
       this.setColour(40);
@@ -827,7 +865,7 @@ export const register_blocks = () => {
         return count;
       };
       this.appendDummyInput()
-        .appendField("dict")
+        .appendField(b("block_dict", "dict"))
         .appendField(new Blockly.FieldNumber(0, 0, 6, 1, validator), "COUNT");
       this.setOutput(true, expr_output);
       this.setColour(40);
@@ -843,9 +881,9 @@ export const register_blocks = () => {
       }
       for (let entry_index = 0; entry_index < (this as dict_block).itemCount_; entry_index += 1) {
         const key_input = this.appendValueInput(`KEY${entry_index}`).setCheck(expr_output);
-        key_input.appendField(entry_index === 0 ? "key" : "");
+        key_input.appendField(entry_index === 0 ? b("block_key", "key") : "");
         const value_input = this.appendValueInput(`VALUE${entry_index}`).setCheck(expr_output);
-        value_input.appendField("value");
+        value_input.appendField(b("block_value", "value"));
       }
     },
   };
@@ -860,7 +898,7 @@ export const register_blocks = () => {
         return count;
       };
       this.appendDummyInput()
-        .appendField("set")
+        .appendField(b("block_set", "set"))
         .appendField(new Blockly.FieldNumber(0, 0, 8, 1, validator), "COUNT");
       this.setOutput(true, expr_output);
       this.setColour(40);
@@ -909,9 +947,9 @@ export const register_blocks = () => {
           }),
           "KIND",
         );
-      this.appendValueInput("ELEMENT").setCheck(expr_output).appendField("element");
+      this.appendValueInput("ELEMENT").setCheck(expr_output).appendField(b("block_element", "element"));
       this.appendDummyInput()
-        .appendField("for")
+        .appendField(b("block_for", "for"))
         .appendField(new Blockly.FieldNumber(1, 1, 4, 1, validator), "FOR_COUNT");
       this.setOutput(true, expr_output);
       this.setColour(50);
@@ -935,15 +973,15 @@ export const register_blocks = () => {
       }
       if (this.getFieldValue("KIND") === "dict") {
         if (!this.getInput("KEY")) {
-          this.appendValueInput("KEY").setCheck(expr_output).appendField("key");
+          this.appendValueInput("KEY").setCheck(expr_output).appendField(b("block_key", "key"));
         }
       } else if (this.getInput("KEY")) {
         this.removeInput("KEY");
       }
       for (let for_index = 0; for_index < comp_block.forCount_; for_index += 1) {
         const target_input = this.appendValueInput(`TARGET${for_index}`).setCheck(expr_output);
-        target_input.appendField("for");
-        this.appendValueInput(`ITER${for_index}`).setCheck(expr_output).appendField("in");
+        target_input.appendField(b("block_for", "for"));
+        this.appendValueInput(`ITER${for_index}`).setCheck(expr_output).appendField(b("block_for_in", "in"));
         const if_validator = (value: number | string) => {
           const count = Math.max(0, Math.floor(Number(value)));
           comp_block.ifCounts_[for_index] = count;
@@ -951,7 +989,7 @@ export const register_blocks = () => {
           return count;
         };
         this.appendDummyInput(`IFCOUNT${for_index}`)
-          .appendField("if")
+          .appendField(b("block_if", "if"))
           .appendField(
             new Blockly.FieldNumber(
               comp_block.ifCounts_[for_index] ?? 0,
@@ -965,7 +1003,7 @@ export const register_blocks = () => {
         for (let if_index = 0; if_index < comp_block.ifCounts_[for_index]; if_index += 1) {
           const input = this.appendValueInput(`IF${for_index}_${if_index}`).setCheck(expr_output);
           if (if_index === 0) {
-            input.appendField("cond");
+            input.appendField(b("block_cond", "cond"));
           }
         }
       }
@@ -974,7 +1012,10 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_call] = {
     init() {
-      this.appendValueInput("CALLEE").setCheck(expr_output).appendField("call");
+      this.appendDummyInput("NAME_ROW")
+        .appendField(b("block_call", "call"))
+        .appendField(new Blockly.FieldTextInput("func"), "NAME");
+      this.appendValueInput("CALLEE").setCheck(expr_output).appendField(b("block_attr", "▸"));
       const validator = (value: number | string) => {
         const count = Math.max(0, Math.floor(Number(value)));
         const call_block = this as call_block;
@@ -984,10 +1025,10 @@ export const register_blocks = () => {
       };
       this.appendDummyInput()
         .appendField("args")
-        .appendField(new Blockly.FieldNumber(1, 0, 8, 1, validator), "ARG_COUNT");
+        .appendField(new Blockly.FieldNumber(0, 0, 8, 1, validator), "ARG_COUNT");
       this.setOutput(true, expr_output);
       this.setColour(290);
-      (this as call_block).itemCount_ = 1;
+      (this as call_block).itemCount_ = 0;
       (this as call_block).updateShape_();
     },
     updateShape_() {
@@ -1021,7 +1062,7 @@ export const register_blocks = () => {
         return count;
       };
       this.appendDummyInput()
-        .appendField("tuple")
+        .appendField(b("block_tuple", "tuple"))
         .appendField(new Blockly.FieldNumber(2, 0, 8, 1, validator), "COUNT");
       this.setOutput(true, expr_output);
       this.setColour(40);
@@ -1051,7 +1092,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_attribute] = {
     init() {
-      this.appendValueInput("VALUE").setCheck(expr_output).appendField("attr");
+      this.appendValueInput("VALUE").setCheck(expr_output).appendField(b("block_attr", "attr"));
       this.appendDummyInput().appendField(
         new Blockly.FieldTextInput("name"),
         "attr",
@@ -1063,7 +1104,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_subscript] = {
     init() {
-      this.appendValueInput("VALUE").setCheck(expr_output).appendField("index");
+      this.appendValueInput("VALUE").setCheck(expr_output).appendField(b("block_index", "index"));
       this.appendValueInput("INDEX").setCheck(expr_output);
       this.setOutput(true, expr_output);
       this.setColour(350);
@@ -1072,7 +1113,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_grouped] = {
     init() {
-      this.appendValueInput("VALUE").setCheck(expr_output).appendField("group");
+      this.appendValueInput("VALUE").setCheck(expr_output).appendField(b("block_group", "group"));
       this.setOutput(true, expr_output);
       this.setColour(200);
     },
@@ -1105,7 +1146,7 @@ export const register_blocks = () => {
       this.appendValueInput("VALUE")
         .setCheck(expr_output)
         .appendField(new Blockly.FieldTextInput("name"), "NAME")
-        .appendField(":=");
+        .appendField(b("block_named_expr", ":="));
       this.setOutput(true, expr_output);
       this.setColour(210);
     },
@@ -1115,7 +1156,7 @@ export const register_blocks = () => {
     init() {
       this.appendValueInput("VALUE")
         .setCheck(expr_output)
-        .appendField("yield");
+        .appendField(b("block_yield", "yield"));
       this.setOutput(true, expr_output);
       this.setColour(290);
     },
@@ -1125,7 +1166,7 @@ export const register_blocks = () => {
     init() {
       this.appendValueInput("VALUE")
         .setCheck(expr_output)
-        .appendField("yield from");
+        .appendField(b("block_yield_from", "yield from"));
       this.setOutput(true, expr_output);
       this.setColour(290);
     },
@@ -1135,7 +1176,7 @@ export const register_blocks = () => {
     init() {
       this.appendValueInput("VALUE")
         .setCheck(expr_output)
-        .appendField("await");
+        .appendField(b("block_await", "await"));
       this.setOutput(true, expr_output);
       this.setColour(290);
     },
@@ -1143,7 +1184,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_return] = {
     init() {
-      this.appendValueInput("VALUE").setCheck(expr_output).appendField("return");
+      this.appendValueInput("VALUE").setCheck(expr_output).appendField(b("block_return", "return"));
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(290);
@@ -1152,7 +1193,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_break] = {
     init() {
-      this.appendDummyInput().appendField("break");
+      this.appendDummyInput().appendField(b("block_break", "break"));
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(120);
@@ -1161,7 +1202,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_continue] = {
     init() {
-      this.appendDummyInput().appendField("continue");
+      this.appendDummyInput().appendField(b("block_continue", "continue"));
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(120);
@@ -1170,7 +1211,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_aug_assign] = {
     init() {
-      this.appendValueInput("TARGET").setCheck(expr_output).appendField("set");
+      this.appendValueInput("TARGET").setCheck(expr_output).appendField(b("block_assign_set", "set"));
       this.appendDummyInput().appendField(
         new Blockly.FieldDropdown([
           ["+=", "plus_assign"],
@@ -1237,7 +1278,7 @@ export const register_blocks = () => {
         t_block.updateShape_();
         return count;
       };
-      this.appendStatementInput("BODY").appendField("try");
+      this.appendStatementInput("BODY").appendField(b("block_try", "try"));
       this.appendDummyInput()
         .appendField("handlers")
         .appendField(new Blockly.FieldNumber(1, 0, 5, 1, validator), "HANDLER_COUNT");
@@ -1262,14 +1303,14 @@ export const register_blocks = () => {
       for (let handler_index = 0; handler_index < (this as try_block).handlerCount_; handler_index += 1) {
         this.appendValueInput(`EXCEPT_TYPE${handler_index}`)
           .setCheck(expr_output)
-          .appendField(`except`);
+          .appendField(b("block_except", "except"));
         this.appendDummyInput(`EXCEPT_NAME${handler_index}`)
           .appendField("as")
           .appendField(new Blockly.FieldTextInput(""), `EXCEPT_NAME${handler_index}`);
-        this.appendStatementInput(`EXCEPT_BODY${handler_index}`).appendField("do");
+        this.appendStatementInput(`EXCEPT_BODY${handler_index}`).appendField(b("block_do", "do"));
       }
-      this.appendStatementInput("ELSE_BODY").appendField("else");
-      this.appendStatementInput("FINALLY_BODY").appendField("finally");
+      this.appendStatementInput("ELSE_BODY").appendField(b("block_else", "else"));
+      this.appendStatementInput("FINALLY_BODY").appendField(b("block_finally", "finally"));
     },
   };
 
@@ -1286,10 +1327,10 @@ export const register_blocks = () => {
         .appendField("@")
         .appendField(new Blockly.FieldTextInput(""), "DECORATORS");
       this.appendDummyInput()
-        .appendField("class")
+        .appendField(b("block_class", "class"))
         .appendField(new Blockly.FieldTextInput("MyClass"), "NAME")
         .appendField(new Blockly.FieldNumber(0, 0, 5, 1, validator), "BASE_COUNT");
-      this.appendStatementInput("BODY").appendField("do");
+      this.appendStatementInput("BODY").appendField(b("block_do", "do"));
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(280);
@@ -1324,10 +1365,10 @@ export const register_blocks = () => {
         return count;
       };
       this.appendDummyInput()
-        .appendField("with")
+        .appendField(b("block_with", "with"))
         .appendField(new Blockly.FieldNumber(1, 1, 8, 1, validator), "COUNT");
-      this.appendDummyInput().appendField("async").appendField(new Blockly.FieldCheckbox("FALSE"), "IS_ASYNC");
-      this.appendStatementInput("BODY").appendField("do");
+      this.appendDummyInput().appendField(b("block_async", "async")).appendField(new Blockly.FieldCheckbox("FALSE"), "IS_ASYNC");
+      this.appendStatementInput("BODY").appendField(b("block_do", "do"));
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(190);
@@ -1358,7 +1399,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_assert_stmt] = {
     init() {
-      this.appendValueInput("CONDITION").setCheck(expr_output).appendField("assert");
+      this.appendValueInput("CONDITION").setCheck(expr_output).appendField(b("block_assert", "assert"));
       this.appendValueInput("MESSAGE").setCheck(expr_output).appendField(",");
       this.setPreviousStatement(true);
       this.setNextStatement(true);
@@ -1368,7 +1409,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_raise_stmt] = {
     init() {
-      this.appendValueInput("EXCEPTION").setCheck(expr_output).appendField("raise");
+      this.appendValueInput("EXCEPTION").setCheck(expr_output).appendField(b("block_raise", "raise"));
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(20);
@@ -1377,7 +1418,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_del_stmt] = {
     init() {
-      this.appendValueInput("TARGET").setCheck(expr_output).appendField("del");
+      this.appendValueInput("TARGET").setCheck(expr_output).appendField(b("block_del", "del"));
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour(330);
@@ -1387,7 +1428,7 @@ export const register_blocks = () => {
   Blockly.Blocks[block_type_global_stmt] = {
     init() {
       this.appendDummyInput()
-        .appendField("global")
+        .appendField(b("block_global", "global"))
         .appendField(new Blockly.FieldTextInput(""), "NAMES");
       this.setPreviousStatement(true);
       this.setNextStatement(true);
@@ -1398,7 +1439,7 @@ export const register_blocks = () => {
   Blockly.Blocks[block_type_nonlocal_stmt] = {
     init() {
       this.appendDummyInput()
-        .appendField("nonlocal")
+        .appendField(b("block_nonlocal", "nonlocal"))
         .appendField(new Blockly.FieldTextInput(""), "NAMES");
       this.setPreviousStatement(true);
       this.setNextStatement(true);
@@ -1418,7 +1459,7 @@ export const register_blocks = () => {
         return count;
       };
       this.appendDummyInput()
-        .appendField("range")
+        .appendField(b("block_range", "range"))
         .appendField(new Blockly.FieldNumber(1, 1, 3, 1, validator), "COUNT");
       this.setOutput(true, expr_output);
       this.setColour(290);
@@ -1433,21 +1474,21 @@ export const register_blocks = () => {
       }
       const count = (this as range_block).itemCount_;
       if (count === 1) {
-        this.appendValueInput("STOP").setCheck(expr_output).appendField("stop");
+        this.appendValueInput("STOP").setCheck(expr_output).appendField(b("block_range_stop", "stop"));
       } else if (count === 2) {
-        this.appendValueInput("START").setCheck(expr_output).appendField("start");
-        this.appendValueInput("STOP").setCheck(expr_output).appendField("stop");
+        this.appendValueInput("START").setCheck(expr_output).appendField(b("block_range_start", "start"));
+        this.appendValueInput("STOP").setCheck(expr_output).appendField(b("block_range_stop", "stop"));
       } else {
-        this.appendValueInput("START").setCheck(expr_output).appendField("start");
-        this.appendValueInput("STOP").setCheck(expr_output).appendField("stop");
-        this.appendValueInput("STEP").setCheck(expr_output).appendField("step");
+        this.appendValueInput("START").setCheck(expr_output).appendField(b("block_range_start", "start"));
+        this.appendValueInput("STOP").setCheck(expr_output).appendField(b("block_range_stop", "stop"));
+        this.appendValueInput("STEP").setCheck(expr_output).appendField(b("block_range_step", "step"));
       }
     },
   };
 
   Blockly.Blocks[block_type_len] = {
     init() {
-      this.appendValueInput("OBJ").setCheck(expr_output).appendField("len");
+      this.appendValueInput("OBJ").setCheck(expr_output).appendField(b("block_len", "len"));
       this.setOutput(true, expr_output);
       this.setColour(290);
     },
@@ -1455,7 +1496,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_input] = {
     init() {
-      this.appendValueInput("PROMPT").setCheck(expr_output).appendField("input");
+      this.appendValueInput("PROMPT").setCheck(expr_output).appendField(b("block_input", "input"));
       this.setOutput(true, expr_output);
       this.setColour(290);
     },
@@ -1485,7 +1526,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_enumerate] = {
     init() {
-      this.appendValueInput("ITERABLE").setCheck(expr_output).appendField("enumerate");
+      this.appendValueInput("ITERABLE").setCheck(expr_output).appendField(b("block_enumerate", "enumerate"));
       this.appendValueInput("START").setCheck(expr_output).appendField("start=");
       this.setOutput(true, expr_output);
       this.setColour(290);
@@ -1502,7 +1543,7 @@ export const register_blocks = () => {
         return count;
       };
       this.appendDummyInput()
-        .appendField("zip")
+        .appendField(b("block_zip", "zip"))
         .appendField(new Blockly.FieldNumber(2, 2, 8, 1, validator), "COUNT");
       this.setOutput(true, expr_output);
       this.setColour(290);
@@ -1526,7 +1567,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_sorted] = {
     init() {
-      this.appendValueInput("ITERABLE").setCheck(expr_output).appendField("sorted");
+      this.appendValueInput("ITERABLE").setCheck(expr_output).appendField(b("block_sorted", "sorted"));
       this.setOutput(true, expr_output);
       this.setColour(290);
     },
@@ -1534,7 +1575,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_reversed] = {
     init() {
-      this.appendValueInput("ITERABLE").setCheck(expr_output).appendField("reversed");
+      this.appendValueInput("ITERABLE").setCheck(expr_output).appendField(b("block_reversed", "reversed"));
       this.setOutput(true, expr_output);
       this.setColour(290);
     },
@@ -1560,7 +1601,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_isinstance] = {
     init() {
-      this.appendValueInput("OBJ").setCheck(expr_output).appendField("isinstance");
+      this.appendValueInput("OBJ").setCheck(expr_output).appendField(b("block_isinstance", "isinstance"));
       this.appendValueInput("TYPE").setCheck(expr_output).appendField(",");
       this.setOutput(true, expr_output);
       this.setColour(290);
@@ -1569,7 +1610,7 @@ export const register_blocks = () => {
 
   Blockly.Blocks[block_type_type_check] = {
     init() {
-      this.appendValueInput("OBJ").setCheck(expr_output).appendField("type");
+      this.appendValueInput("OBJ").setCheck(expr_output).appendField(b("block_type_check", "type"));
       this.setOutput(true, expr_output);
       this.setColour(290);
     },

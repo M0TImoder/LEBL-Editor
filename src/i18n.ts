@@ -39,14 +39,16 @@ const translations: Record<Language, Record<string, string>> = {
     toolbox_loops: "ループ",
     toolbox_assignment: "代入",
     toolbox_variables: "変数",
-    toolbox_declared_vars: "宣言済み変数",
+    toolbox_declared_vars: "定義済み変数",
+    toolbox_declared_funcs: "定義済み関数",
     toolbox_definitions: "定義",
     toolbox_imports: "インポート",
     toolbox_output: "出力",
     toolbox_expressions: "式",
     toolbox_statements: "文",
     toolbox_builtins: "組み込み関数",
-    msg_no_declared_vars: "宣言済みの変数なし",
+    msg_no_declared_vars: "定義済みの変数なし",
+    msg_no_declared_funcs: "定義済みの関数なし",
     msg_sync_error: "同期エラー",
 
     // Help Modal
@@ -114,14 +116,16 @@ const translations: Record<Language, Record<string, string>> = {
     toolbox_loops: "Loops",
     toolbox_assignment: "Assignment",
     toolbox_variables: "Variables",
-    toolbox_declared_vars: "Declared Variables",
+    toolbox_declared_vars: "Defined Variables",
+    toolbox_declared_funcs: "Defined Functions",
     toolbox_definitions: "Definitions",
     toolbox_imports: "Import",
     toolbox_output: "Output",
     toolbox_expressions: "Expressions",
     toolbox_statements: "Statements",
     toolbox_builtins: "Built-in Functions",
-    msg_no_declared_vars: "No declared variables",
+    msg_no_declared_vars: "No defined variables",
+    msg_no_declared_funcs: "No defined functions",
     msg_sync_error: "Sync Error",
 
     // Help Modal
@@ -156,7 +160,14 @@ const translations: Record<Language, Record<string, string>> = {
 let current_language: Language =
   (localStorage.getItem("lebl_language") as Language) ?? "ja";
 
+let easy_mode: boolean =
+  localStorage.getItem("lebl_easy_mode") === "true";
+
 export const t = (key: string): string => {
+  if (easy_mode && current_language === "ja") {
+    const easy = easy_labels[key];
+    if (easy) return easy;
+  }
   return translations[current_language]?.[key] ?? translations["ja"]?.[key] ?? key;
 };
 
@@ -167,4 +178,146 @@ export const set_language = (lang: Language) => {
 
 export const get_language = (): Language => current_language;
 
+export const set_easy_mode = (enabled: boolean) => {
+  easy_mode = enabled;
+  localStorage.setItem("lebl_easy_mode", String(enabled));
+};
+
+export const get_easy_mode = (): boolean => easy_mode;
+
 export type { Language };
+
+const easy_labels: Record<string, string> = {
+  // Event
+  block_start: "はじめ",
+  block_do: "じっこう",
+
+  // Control
+  block_if: "もし",
+  block_elif: "それとも もし",
+  block_else: "そうでなければ",
+  block_match: "あたいが",
+  block_case: "のとき",
+
+  // Loops
+  block_while: "くりかえす あいだ",
+  block_while_else: "くりかえしが おわったら",
+  block_for: "くりかえす",
+  block_for_in: "のなかの",
+  block_for_else: "くりかえしが おわったら",
+
+  // Variables
+  block_var_set: "へんすう",
+  block_assign_set: "にいれる",
+  block_assign_eq: "＝",
+
+  // Functions
+  block_def: "かんすう をつくる",
+  block_return: "もどす",
+  block_call: "よびだす",
+  block_lambda: "かんたん かんすう",
+
+  // Class
+  block_class: "クラス をつくる",
+
+  // Flow
+  block_pass: "なにもしない",
+  block_break: "くりかえし をやめる",
+  block_continue: "つぎへすすむ",
+
+  // Print / IO
+  block_print: "ひょうじする",
+  block_input: "にゅうりょく",
+  block_wait: "まつ",
+
+  // Literals
+  block_num: "すうじ",
+  block_str: "もじ",
+  block_bool: "しんぎ",
+  block_none: "なし",
+  block_id: "なまえ",
+
+  // Collections
+  block_list: "リスト",
+  block_tuple: "タプル",
+  block_dict: "じしょ",
+  block_set: "セット",
+  block_items: "なかみ",
+  block_key: "キー",
+  block_value: "あたい",
+
+  // Operators
+  block_compare: "くらべる",
+  block_boolop: "ろんり",
+  block_ifexpr: "もし～なら",
+
+  // Error handling
+  block_try: "ためす",
+  block_except: "エラーのとき",
+  block_finally: "さいごに",
+  block_raise: "エラーをだす",
+  block_assert: "たしかめる",
+
+  // With
+  block_with: "つかう",
+
+  // Import
+  block_import: "よみこむ",
+  block_module: "モジュール",
+
+  // Scope
+  block_del: "けす",
+  block_global: "ぜんたいの へんすう",
+  block_nonlocal: "そとの へんすう",
+
+  // Comprehension
+  block_comp: "まとめてつくる",
+  block_element: "ようそ",
+  block_cond: "じょうけん",
+
+  // Built-in functions
+  block_range: "はんい",
+  block_range_stop: "おわり",
+  block_range_start: "はじめ",
+  block_range_step: "きざみ",
+  block_len: "ながさ",
+  block_sorted: "ならべかえ",
+  block_reversed: "ぎゃくならべ",
+  block_math_func: "けいさん",
+  block_type_check: "かた",
+  block_isinstance: "かた チェック",
+  block_enumerate: "ばんごうつき",
+  block_zip: "くみあわせ",
+  block_type_convert: "かた へんかん",
+
+  // Misc
+  block_attr: "のなかの",
+  block_index: "ばんめ",
+  block_group: "グループ",
+  block_slice: "きりだし",
+  block_fstring: "ぶんしょう",
+  block_yield: "わたす",
+  block_yield_from: "ぜんぶ わたす",
+  block_await: "まつ",
+  block_named_expr: "いれて つかう",
+  block_ann_assign: "かた つき だいにゅう",
+  block_async: "ひどうき",
+
+  // Toolbox
+  toolbox_events: "イベント",
+  toolbox_control: "せいぎょ",
+  toolbox_loops: "くりかえし",
+  toolbox_assignment: "だいにゅう",
+  toolbox_variables: "へんすう",
+  toolbox_declared_vars: "つかった へんすう",
+  toolbox_declared_funcs: "つくった かんすう",
+  toolbox_definitions: "ていぎ",
+  toolbox_imports: "よみこみ",
+  toolbox_output: "しゅつりょく",
+  toolbox_expressions: "しき",
+  toolbox_statements: "ぶん",
+  toolbox_builtins: "べんりな きのう",
+
+  // UI
+  btn_easy_mode: "イージーモード",
+};

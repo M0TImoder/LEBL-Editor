@@ -1194,7 +1194,13 @@ const create_expr_block = (expression: expr): Blockly.Block | null => {
       block.itemCount_ = args_count;
       block.updateShape_();
       block.setFieldValue(String(args_count), "ARG_COUNT");
-      attach_expr_input(block, "CALLEE", expression.data.callee);
+      // If callee is a simple identifier, put name in the text field
+      if (expression.data.callee.kind === "Identifier") {
+        block.setFieldValue(expression.data.callee.data.name, "NAME");
+      } else {
+        block.setFieldValue("", "NAME");
+        attach_expr_input(block, "CALLEE", expression.data.callee);
+      }
       expression.data.args.forEach((arg, index) => {
         attach_expr_input(block, `ARG${index}`, arg);
       });
@@ -2256,11 +2262,21 @@ const expr_from_block = (block: Blockly.Block): expr => {
           args.push(expr_from_block(input.connection.targetBlock() as Blockly.Block));
         }
       }
+      const callee_block = block.getInputTargetBlock("CALLEE");
+      const callee: expr = callee_block
+        ? expr_from_block(callee_block)
+        : {
+            kind: "Identifier",
+            data: {
+              meta: make_meta(),
+              name: block.getFieldValue("NAME") || "func",
+            },
+          };
       return {
         kind: "Call",
         data: {
           meta: make_meta(),
-          callee: expr_from_input(block, "CALLEE"),
+          callee,
           args,
           kwargs: [],
         },
@@ -2529,6 +2545,10 @@ const pattern_from_expr = (expression: expr): pattern => {
 
 let last_ir_json: string | null = null;
 
+export const clear_ir_cache = () => {
+  last_ir_json = null;
+};
+
 export const blocks_from_ir = (ir: ir_program) => {
   if (!workspace) {
     return;
@@ -2543,11 +2563,13 @@ export const blocks_from_ir = (ir: ir_program) => {
   const scroll_x = metrics?.viewLeft ?? 0;
   const scroll_y = metrics?.viewTop ?? 0;
   const scale = workspace.scale;
+  const view_width = metrics?.viewWidth ?? 600;
   workspace.clear();
   const entry_block = workspace.newBlock(block_type_event_start);
   attach_statement_body(entry_block, "BODY", ir.body);
   init_block(entry_block);
-  (entry_block as Blockly.BlockSvg).moveBy(24, 24);
+  const center_x = Math.max(24, view_width / scale / 2 - 100);
+  (entry_block as Blockly.BlockSvg).moveBy(center_x, 24);
   workspace.cleanUp();
   Blockly.Events.enable();
   workspace.scale = scale;

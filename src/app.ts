@@ -11,17 +11,20 @@ import { tags } from "@lezer/highlight";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { autocompletion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import type { ir_program, run_result, theme_mode } from "./types";
-import { t, set_language, get_language, type Language } from "./i18n";
+import { t, set_language, get_language, get_easy_mode, set_easy_mode, type Language } from "./i18n";
 import {
   blockly_theme_dark,
   blockly_theme_light,
   build_declared_variable_category,
+  build_declared_function_category,
   declared_variables_category_key,
+  declared_functions_category_key,
   register_blocks,
   get_toolbox,
 } from "./blockly_config";
 import {
   blocks_from_ir,
+  clear_ir_cache,
   get_block_span,
   get_workspace,
   ir_from_blocks,
@@ -64,6 +67,7 @@ let stop_button: HTMLButtonElement | null = null;
 let help_button: HTMLButtonElement | null = null;
 let help_modal_overlay: HTMLElement | null = null;
 let language_toggle_button: HTMLButtonElement | null = null;
+let easy_mode_toggle_button: HTMLButtonElement | null = null;
 let is_syncing = false;
 let current_theme: theme_mode = "light";
 let code_sync_timer: ReturnType<typeof setTimeout> | null = null;
@@ -342,6 +346,38 @@ const ensure_workspace = () => {
     declared_variables_category_key,
     build_declared_variable_category,
   );
+  workspace.registerToolboxCategoryCallback(
+    declared_functions_category_key,
+    build_declared_function_category,
+  );
+
+  // Fix flyout scale to 1 so toolbox menu doesn't resize with zoom
+  const flyout = workspace.getFlyout();
+  if (flyout) {
+    (flyout as any).getFlyoutScale = () => 1;
+    flyout.autoClose = false;
+  }
+
+  // Only close flyout when clicking the already-selected toolbox category
+  const toolbox = workspace.getToolbox();
+  if (toolbox) {
+    const orig_setSelectedItem = (toolbox as any).setSelectedItem.bind(toolbox);
+    (toolbox as any).setSelectedItem = (newItem: any) => {
+      const oldItem = (toolbox as any).selectedItem_;
+      if (oldItem && oldItem === newItem) {
+        // Same category clicked — toggle closed
+        (toolbox as any).deselectItem_(oldItem);
+        flyout?.setVisible(false);
+        return;
+      }
+      if (!newItem) {
+        // Null selection (e.g. workspace click) — keep flyout open
+        return;
+      }
+      orig_setSelectedItem(newItem);
+    };
+  }
+
   set_workspace(workspace);
 };
 
@@ -391,6 +427,13 @@ const sync_blocks_to_code = async () => {
   } finally {
     is_syncing = false;
   }
+};
+
+/** Force a code→blocks rebuild (used when block labels change). */
+const trigger_code_to_blocks_sync = () => {
+  clear_ir_cache();
+  const source = get_editor_value();
+  sync_code_to_blocks(source);
 };
 
 const schedule_code_sync = (source: string) => {
@@ -536,7 +579,8 @@ const create_codemirror = (parent: HTMLElement, initial_source: string) => {
             outline: "1px solid rgba(255, 0, 0, 0.3)",
           },
           ".cm-highlight-line": {
-            backgroundColor: "rgba(59, 130, 246, 0.12)",
+            backgroundColor: "rgba(59, 130, 246, 0.25)",
+            outline: "1px solid rgba(59, 130, 246, 0.4)",
           },
         }),
       ],
@@ -568,6 +612,14 @@ const update_ui_text = () => {
   }
   if (language_toggle_button) {
     language_toggle_button.textContent = get_language() === "ja" ? "日本語" : "English";
+  }
+
+  // Easy mode toggle visibility + label
+  if (easy_mode_toggle_button) {
+    easy_mode_toggle_button.style.display = get_language() === "ja" ? "" : "none";
+    easy_mode_toggle_button.textContent = get_easy_mode()
+      ? "イージーモード：ON"
+      : "イージーモード：OFF";
   }
 
   // Tab close button titles
@@ -616,6 +668,8 @@ export const init_app = () => {
     help_modal_overlay = document.getElementById("help_modal_overlay");
     language_toggle_button =
       document.querySelector<HTMLButtonElement>("#language_toggle");
+    easy_mode_toggle_button =
+      document.querySelector<HTMLButtonElement>("#easy_mode_toggle");
     const help_modal_close = document.getElementById("help_modal_close");
 
     const stored_theme =
@@ -677,7 +731,11 @@ export const init_app = () => {
         }
         const selected = event as Blockly.Events.Selected;
         if (selected.newElementId) {
-          const block = workspace.getBlockById(selected.newElementId);
+          let block: Blockly.Block | null = workspace.getBlockById(selected.newElementId);
+          // Walk up to find nearest block with a span (expression → parent statement)
+          while (block && !get_block_span(block)) {
+            block = block.getParent();
+          }
           if (block) {
             const span = get_block_span(block);
             if (span) {
@@ -692,6 +750,54 @@ export const init_app = () => {
           effects: set_highlight_effect.of(null),
         });
       });
+
+      // Middle-click: pan workspace canvas (don't move blocks)
+      const blockly_div = document.querySelector<HTMLElement>(`#${workspace_container_id} .injectionDiv`);
+      if (blockly_div) {
+        let is_panning = false;
+        let pan_start_x = 0;
+        let pan_start_y = 0;
+        let scroll_start_x = 0;
+        let scroll_start_y = 0;
+
+        blockly_div.addEventListener("pointerdown", (e) => {
+          if (e.button === 1) {
+            e.preventDefault();
+            e.stopPropagation();
+            is_panning = true;
+            pan_start_x = e.clientX;
+            pan_start_y = e.clientY;
+            scroll_start_x = workspace.scrollX;
+            scroll_start_y = workspace.scrollY;
+            blockly_div.setPointerCapture(e.pointerId);
+          }
+        }, true);
+
+        blockly_div.addEventListener("pointermove", (e) => {
+          if (!is_panning) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const dx = e.clientX - pan_start_x;
+          const dy = e.clientY - pan_start_y;
+          workspace.scroll(scroll_start_x + dx, scroll_start_y + dy);
+        }, true);
+
+        const stop_pan = (e: PointerEvent) => {
+          if (!is_panning) return;
+          is_panning = false;
+          blockly_div.releasePointerCapture(e.pointerId);
+        };
+        blockly_div.addEventListener("pointerup", stop_pan, true);
+        blockly_div.addEventListener("pointercancel", stop_pan, true);
+
+        // Also block mousedown to prevent Blockly's own middle-click handling
+        blockly_div.addEventListener("mousedown", (e) => {
+          if (e.button === 1) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }, true);
+      }
     }
 
     save_button?.addEventListener("click", async () => {
@@ -767,11 +873,28 @@ export const init_app = () => {
     language_toggle_button?.addEventListener("click", () => {
       const new_lang: Language = get_language() === "ja" ? "en" : "ja";
       set_language(new_lang);
+      // Re-register blocks so labels reflect new language
+      register_blocks();
       update_ui_text();
       const workspace = get_workspace();
       if (workspace) {
         workspace.updateToolbox(get_toolbox());
       }
+      // Force re-sync code→blocks to rebuild block labels
+      trigger_code_to_blocks_sync();
+    });
+
+    easy_mode_toggle_button?.addEventListener("click", () => {
+      set_easy_mode(!get_easy_mode());
+      // Re-register blocks so labels use easy mode text
+      register_blocks();
+      update_ui_text();
+      const workspace = get_workspace();
+      if (workspace) {
+        workspace.updateToolbox(get_toolbox());
+      }
+      // Force re-sync code→blocks to rebuild block labels
+      trigger_code_to_blocks_sync();
     });
 
     help_button?.addEventListener("click", () => {
