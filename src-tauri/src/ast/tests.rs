@@ -359,3 +359,69 @@ fn generate_expr(seed: u64, depth: u8) -> Expr {
         }),
     }
 }
+
+#[test]
+fn tuple_assign_roundtrip() {
+    let source = "a, b = 1, 2\n";
+    let program = parse_with(PythonVersion::Py310, source).unwrap();
+    let rendered = program.to_python(RenderConfig {
+        mode: RenderMode::Pretty,
+        reuse_token_ranges: false,
+    });
+    assert_eq!(rendered, source);
+}
+
+#[test]
+fn tuple_assign_three_targets() {
+    let source = "a, b, c = func()\n";
+    let program = parse_with(PythonVersion::Py310, source).unwrap();
+    let rendered = program.to_python(RenderConfig {
+        mode: RenderMode::Pretty,
+        reuse_token_ranges: false,
+    });
+    assert_eq!(rendered, source);
+}
+
+#[test]
+fn single_assign_still_works() {
+    let source = "x = 5\n";
+    let program = parse_with(PythonVersion::Py310, source).unwrap();
+    let rendered = program.to_python(RenderConfig {
+        mode: RenderMode::Pretty,
+        reuse_token_ranges: false,
+    });
+    assert_eq!(rendered, source);
+}
+
+#[test]
+fn for_range_roundtrip() {
+    let source = "for i in range(1, 100):\n    pass\n";
+    let program = parse_with(PythonVersion::Py310, source).unwrap();
+    let ir = python_to_ir(&program);
+    let ir_json = serde_json::to_string_pretty(&ir).unwrap();
+    eprintln!("IR JSON: {}", ir_json);
+    let rendered = program.to_python(RenderConfig {
+        mode: RenderMode::Pretty,
+        reuse_token_ranges: false,
+    });
+    eprintln!("Rendered: {:?}", rendered);
+    assert_eq!(rendered.trim(), source.trim());
+
+    // Also test IR round-trip
+    let features = FeatureSet::from_version(PythonVersion::Py310);
+    let program2 = ir_to_python(&ir, &features);
+    match &program2 {
+        Ok(p) => {
+            let rendered2 = p.to_python(RenderConfig {
+                mode: RenderMode::Pretty,
+                reuse_token_ranges: false,
+            });
+            eprintln!("IR Rendered: {:?}", rendered2);
+            assert_eq!(rendered2.trim(), source.trim());
+        }
+        Err(e) => {
+            eprintln!("IR to Python error: {:?}", e);
+            panic!("IR to Python failed: {:?}", e);
+        }
+    }
+}

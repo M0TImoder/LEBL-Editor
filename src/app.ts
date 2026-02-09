@@ -6,16 +6,19 @@ import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLi
 import { EditorState, Compartment, StateEffect, StateField } from "@codemirror/state";
 import { python } from "@codemirror/lang-python";
 import { defaultKeymap, indentWithTab, history, historyKeymap } from "@codemirror/commands";
-import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from "@codemirror/language";
+import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, HighlightStyle, syntaxTree } from "@codemirror/language";
+import { tags } from "@lezer/highlight";
 import { oneDark } from "@codemirror/theme-one-dark";
+import { autocompletion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import type { ir_program, run_result, theme_mode } from "./types";
+import { t, set_language, get_language, type Language } from "./i18n";
 import {
   blockly_theme_dark,
   blockly_theme_light,
   build_declared_variable_category,
   declared_variables_category_key,
   register_blocks,
-  toolbox,
+  get_toolbox,
 } from "./blockly_config";
 import {
   blocks_from_ir,
@@ -61,6 +64,7 @@ let run_button: HTMLButtonElement | null = null;
 let stop_button: HTMLButtonElement | null = null;
 let help_button: HTMLButtonElement | null = null;
 let help_modal_overlay: HTMLElement | null = null;
+let language_toggle_button: HTMLButtonElement | null = null;
 let is_syncing = false;
 let current_theme: theme_mode = "light";
 let code_sync_timer: ReturnType<typeof setTimeout> | null = null;
@@ -113,7 +117,7 @@ const render_tabs = () => {
     const close_btn = document.createElement("button");
     close_btn.className = "tab_close";
     close_btn.textContent = "×";
-    close_btn.title = "閉じる";
+    close_btn.title = t("btn_close");
     close_btn.addEventListener("click", (e) => {
       e.stopPropagation();
       close_tab(tab.id);
@@ -156,7 +160,7 @@ const close_tab = (tab_id: string) => {
   const tab = tabs.find((t) => t.id === tab_id);
   if (!tab) return;
   if (tab.dirty) {
-    if (!confirm(`「${tab.name}」は未保存の変更があります。閉じますか？`)) return;
+    if (!confirm(`「${tab.name}」${t("confirm_close_unsaved")}`)) return;
   }
   const idx = tabs.indexOf(tab);
   tabs.splice(idx, 1);
@@ -283,7 +287,7 @@ const apply_theme = (theme: theme_mode) => {
     });
   }
   if (theme_toggle_button) {
-    theme_toggle_button.textContent = theme === "dark" ? "ライト" : "ダーク";
+    theme_toggle_button.textContent = theme === "dark" ? t("theme_light") : t("theme_dark");
   }
 };
 
@@ -292,7 +296,7 @@ const ensure_workspace = () => {
     return;
   }
   const workspace = Blockly.inject(workspace_container_id, {
-    toolbox,
+    toolbox: get_toolbox(),
     grid: {
       spacing: 20,
       length: 3,
@@ -329,7 +333,7 @@ const sync_code_to_blocks = async (source: string) => {
     set_error_line(null);
   } catch (error) {
     const error_str = String(error);
-    set_output(`同期エラー: ${error_str}`);
+    set_output(`${t("error_sync")}: ${error_str}`);
     const line = parse_error_line(error_str);
     set_error_line(line);
     show_sync_error_block();
@@ -357,7 +361,7 @@ const sync_blocks_to_code = async () => {
       localStorage.setItem(local_storage_source_key, source);
     }
   } catch (error) {
-    set_output(`同期エラー: ${String(error)}`);
+    set_output(`${t("error_sync")}: ${String(error)}`);
   } finally {
     is_syncing = false;
   }
@@ -380,16 +384,81 @@ const run_python_code = async () => {
   if (!cm_editor) {
     return;
   }
-  set_output("実行中...");
+  set_output(t("status_running"));
   try {
     const result = await run_python(get_editor_value());
     const combined = [result.stdout, result.stderr].filter(Boolean).join("\n");
-    const text = combined.length > 0 ? combined : "出力なし";
+    const text = combined.length > 0 ? combined : t("status_no_output");
     set_output(text);
   } catch (error) {
-    set_output(`実行エラー: ${String(error)}`);
+    set_output(`${t("error_run")}: ${String(error)}`);
   }
 };
+
+const python_keywords = [
+  "False", "None", "True", "and", "as", "assert", "async", "await", "break",
+  "class", "continue", "def", "del", "elif", "else", "except", "finally",
+  "for", "from", "global", "if", "import", "in", "is", "lambda", "nonlocal",
+  "not", "or", "pass", "raise", "return", "try", "while", "with", "yield",
+];
+
+const python_builtins = [
+  "abs", "all", "any", "bin", "bool", "breakpoint", "bytearray", "bytes",
+  "callable", "chr", "classmethod", "compile", "complex", "delattr", "dict",
+  "dir", "divmod", "enumerate", "eval", "exec", "filter", "float", "format",
+  "frozenset", "getattr", "globals", "hasattr", "hash", "help", "hex", "id",
+  "input", "int", "isinstance", "issubclass", "iter", "len", "list", "locals",
+  "map", "max", "memoryview", "min", "next", "object", "oct", "open", "ord",
+  "pow", "print", "property", "range", "repr", "reversed", "round", "set",
+  "setattr", "slice", "sorted", "staticmethod", "str", "sum", "super",
+  "tuple", "type", "vars", "zip",
+];
+
+const python_modules = [
+  "os", "sys", "math", "random", "json", "re", "datetime", "time",
+  "collections", "itertools", "functools", "pathlib", "typing",
+];
+
+const get_document_identifiers = (doc: string): { label: string; type: string }[] => {
+  const seen = new Set<string>();
+  const results: { label: string; type: string }[] = [];
+  const re = /^[ \t]*([A-Za-z_]\w*)\s*=/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(doc)) !== null) {
+    const name = m[1];
+    if (!seen.has(name)) {
+      seen.add(name);
+      results.push({ label: name, type: "variable" });
+    }
+  }
+  return results;
+};
+
+const comment_highlight = HighlightStyle.define([
+  { tag: tags.comment, color: "#22863a" },
+  { tag: tags.lineComment, color: "#22863a" },
+  { tag: tags.blockComment, color: "#22863a" },
+]);
+
+function python_completions(context: CompletionContext): CompletionResult | null {
+  const tree = syntaxTree(context.state);
+  const node = tree.resolveInner(context.pos, -1);
+  if (node.type.name === "Comment" || node.type.name === "LineComment" || node.type.name === "BlockComment") {
+    return null;
+  }
+
+  const word = context.matchBefore(/\w*/);
+  if (!word || (word.from === word.to && !context.explicit)) return null;
+
+  const completions = [
+    ...python_keywords.map(k => ({ label: k, type: "keyword" })),
+    ...python_builtins.map(b => ({ label: b, type: "function" })),
+    ...python_modules.map(m => ({ label: m, type: "namespace" })),
+    ...get_document_identifiers(context.state.doc.toString()),
+  ];
+
+  return { from: word.from, options: completions };
+}
 
 const create_codemirror = (parent: HTMLElement, initial_source: string) => {
   const update_listener = EditorView.updateListener.of((update) => {
@@ -417,6 +486,8 @@ const create_codemirror = (parent: HTMLElement, initial_source: string) => {
         history(),
         keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
         python(),
+        autocompletion({ override: [python_completions] }),
+        syntaxHighlighting(comment_highlight),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         theme_compartment.of(current_theme === "dark" ? oneDark : []),
         update_listener,
@@ -448,6 +519,62 @@ const create_codemirror = (parent: HTMLElement, initial_source: string) => {
   });
 };
 
+const update_ui_text = () => {
+  // Subtitle
+  const subtitle = document.querySelector<HTMLElement>(".app_subtitle");
+  if (subtitle) subtitle.textContent = t("title_subtitle");
+
+  // Section headers
+  const pane_headers = document.querySelectorAll<HTMLElement>(".pane_header");
+  pane_headers.forEach((el) => {
+    const key = el.dataset.i18n;
+    if (key) el.textContent = t(key);
+  });
+
+  // Buttons
+  if (run_button) run_button.textContent = t("btn_run");
+  if (stop_button) stop_button.textContent = t("btn_stop");
+  if (save_button) save_button.textContent = t("btn_save");
+  if (load_button) load_button.textContent = t("btn_load");
+  if (help_button) help_button.textContent = t("btn_help");
+  if (theme_toggle_button) {
+    theme_toggle_button.textContent = current_theme === "dark" ? t("theme_light") : t("theme_dark");
+  }
+  if (language_toggle_button) {
+    language_toggle_button.textContent = get_language() === "ja" ? "日本語" : "English";
+  }
+
+  // Tab close button titles
+  document.querySelectorAll<HTMLButtonElement>(".tab_close").forEach((btn) => {
+    btn.title = t("btn_close");
+  });
+
+  // Help modal
+  const help_modal = document.querySelector<HTMLElement>(".help_modal");
+  if (help_modal) {
+    const h2 = help_modal.querySelector("h2");
+    if (h2) h2.textContent = t("help_title");
+
+    const h3s = help_modal.querySelectorAll<HTMLElement>("h3[data-i18n]");
+    h3s.forEach((el) => {
+      const key = el.dataset.i18n;
+      if (key) el.textContent = t(key);
+    });
+
+    const lis = help_modal.querySelectorAll<HTMLElement>("li[data-i18n]");
+    lis.forEach((el) => {
+      const key = el.dataset.i18n;
+      if (key) el.textContent = t(key);
+    });
+
+    const ps = help_modal.querySelectorAll<HTMLElement>("p[data-i18n]");
+    ps.forEach((el) => {
+      const key = el.dataset.i18n;
+      if (key) el.textContent = t(key);
+    });
+  }
+};
+
 export const init_app = () => {
   window.addEventListener("DOMContentLoaded", () => {
     const editor_container = document.querySelector<HTMLElement>("#code_editor_container");
@@ -461,6 +588,8 @@ export const init_app = () => {
     stop_button = document.querySelector<HTMLButtonElement>("#stop_button");
     help_button = document.querySelector<HTMLButtonElement>("#help_button");
     help_modal_overlay = document.getElementById("help_modal_overlay");
+    language_toggle_button =
+      document.querySelector<HTMLButtonElement>("#language_toggle");
     const help_modal_close = document.getElementById("help_modal_close");
 
     const stored_theme =
@@ -558,11 +687,11 @@ export const init_app = () => {
             tab.dirty = false;
           }
           localStorage.setItem(local_storage_source_key, get_editor_value());
-          set_output(`保存しました: ${path}`);
+          set_output(`${t("status_saved")}: ${path}`);
           render_tabs();
         }
       } catch (error) {
-        set_output(`保存エラー: ${String(error)}`);
+        set_output(`${t("error_save")}: ${String(error)}`);
       }
     });
 
@@ -585,10 +714,10 @@ export const init_app = () => {
           const file_name = path.split(/[\\/]/).pop() ?? "file.py";
           create_tab(file_name, content, path);
           localStorage.setItem(local_storage_source_key, content);
-          set_output(`読み込みました: ${path}`);
+          set_output(`${t("status_loaded")}: ${path}`);
         }
       } catch (error) {
-        set_output(`読み込みエラー: ${String(error)}`);
+        set_output(`${t("error_load")}: ${String(error)}`);
       }
     });
 
@@ -601,12 +730,22 @@ export const init_app = () => {
         const result = await stop_python();
         set_output(result);
       } catch (error) {
-        set_output(`停止エラー: ${String(error)}`);
+        set_output(`${t("error_stop")}: ${String(error)}`);
       }
     });
 
     theme_toggle_button?.addEventListener("click", () => {
       apply_theme(current_theme === "dark" ? "light" : "dark");
+    });
+
+    language_toggle_button?.addEventListener("click", () => {
+      const new_lang: Language = get_language() === "ja" ? "en" : "ja";
+      set_language(new_lang);
+      update_ui_text();
+      const workspace = get_workspace();
+      if (workspace) {
+        workspace.updateToolbox(get_toolbox());
+      }
     });
 
     help_button?.addEventListener("click", () => {
@@ -633,6 +772,7 @@ export const init_app = () => {
       }
     });
 
+    update_ui_text();
     sync_code_to_blocks(initial_source);
 
     window.addEventListener("resize", () => {

@@ -25,13 +25,14 @@
           <button id="save_button" class="app_button" type="button">保存</button>
           <button id="load_button" class="app_button" type="button">読み込み</button>
           <button id="theme_toggle" class="app_button" type="button">ダーク</button>
+          <button id="language_toggle" class="app_button" title="Language">日本語</button>
           <button id="help_button" class="app_button" type="button">？</button>
         </div>
       </header>
       <main class="app_main">
         <div class="pane_group">
           <section class="pane code_pane">
-            <div class="pane_header">Pythonコード</div>
+            <div class="pane_header" data-i18n="label_python_code">Pythonコード</div>
             <div id="tab_bar">
               <div id="tab_list"></div>
               <button id="new_tab_btn" class="tab_add_btn" title="新しいファイル">+</button>
@@ -39,12 +40,12 @@
             <div id="code_editor_container" class="code_editor_container"></div>
           </section>
           <section class="pane block_pane">
-            <div class="pane_header">ブロック</div>
+            <div class="pane_header" data-i18n="label_blocks">ブロック</div>
             <div id="blockly_workspace" class="blockly_workspace"></div>
           </section>
         </div>
         <section class="pane output_pane">
-          <div class="pane_header">実行結果</div>
+          <div class="pane_header" data-i18n="label_output">実行結果</div>
           <pre id="output_console" class="output_console"></pre>
         </section>
       </main>
@@ -55,30 +56,30 @@
         <button id="help_modal_close" class="help_modal_close" type="button">×</button>
         <h2>LEBL Editor - ヘルプ</h2>
 
-        <h3>■ 基本操作</h3>
+        <h3 data-i18n="help_basic_title">■ 基本操作</h3>
         <ul>
-          <li>左側のコードエディタにPythonコードを入力すると、右側にブロックが自動生成されます</li>
-          <li>右側のブロックを編集すると、左側のコードが自動更新されます</li>
-          <li>ツールボックス（右端）からブロックをドラッグして追加できます</li>
+          <li data-i18n="help_basic_1">左側のコードエディタにPythonコードを入力すると、右側にブロックが自動生成されます</li>
+          <li data-i18n="help_basic_2">右側のブロックを編集すると、左側のコードが自動更新されます</li>
+          <li data-i18n="help_basic_3">ツールボックス（右端）からブロックをドラッグして追加できます</li>
         </ul>
 
-        <h3>■ ファイル操作</h3>
+        <h3 data-i18n="help_file_title">■ ファイル操作</h3>
         <ul>
-          <li>開く: ファイルを開いて編集</li>
-          <li>保存: 現在のファイルを保存</li>
-          <li>名前をつけて保存: 新しい名前で保存</li>
-          <li>タブ: 複数ファイルを同時に編集可能</li>
+          <li data-i18n="help_file_1">開く: ファイルを開いて編集</li>
+          <li data-i18n="help_file_2">保存: 現在のファイルを保存</li>
+          <li data-i18n="help_file_3">名前をつけて保存: 新しい名前で保存</li>
+          <li data-i18n="help_file_4">タブ: 複数ファイルを同時に編集可能</li>
         </ul>
 
-        <h3>■ 実行</h3>
+        <h3 data-i18n="help_run_title">■ 実行</h3>
         <ul>
-          <li>「実行」ボタンでPythonコードを実行</li>
-          <li>「停止」ボタンで実行中のプログラムを停止</li>
-          <li>実行結果は下部の出力エリアに表示されます</li>
+          <li data-i18n="help_run_1">「実行」ボタンでPythonコードを実行</li>
+          <li data-i18n="help_run_2">「停止」ボタンで実行中のプログラムを停止</li>
+          <li data-i18n="help_run_3">実行結果は下部の出力エリアに表示されます</li>
         </ul>
 
-        <h3>■ 対応するPython構文</h3>
-        <p>
+        <h3 data-i18n="help_syntax_title">■ 対応するPython構文</h3>
+        <p data-i18n="help_syntax_text">
           変数代入、if/elif/else、for/while、関数定義、クラス定義、
           リスト/辞書/集合、演算子、比較、論理演算、
           import、try/except、with、return/break/continue、
@@ -86,12 +87,12 @@
           assert/raise/del/global/nonlocal
         </p>
 
-        <h3>■ ショートカットキー</h3>
+        <h3 data-i18n="help_shortcuts_title">■ ショートカットキー</h3>
         <ul>
-          <li>Ctrl+Z: 元に戻す</li>
-          <li>Ctrl+Y: やり直し</li>
-          <li>Ctrl+S: 保存</li>
-          <li>Ctrl+O: 開く</li>
+          <li data-i18n="help_shortcut_1">Ctrl+Z: 元に戻す</li>
+          <li data-i18n="help_shortcut_2">Ctrl+Y: やり直し</li>
+          <li data-i18n="help_shortcut_3">Ctrl+S: 保存</li>
+          <li data-i18n="help_shortcut_4">Ctrl+O: 開く</li>
         </ul>
       </div>
     </div>

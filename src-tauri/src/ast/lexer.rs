@@ -125,7 +125,11 @@ impl Lexer {
                 ':' => {
                     let start = self.current_position();
                     self.advance_char();
-                    self.push_token(TokenKind::Colon, start);
+                    if self.consume_char('=') {
+                        self.push_token(TokenKind::Operator(Operator::ColonAssign), start);
+                    } else {
+                        self.push_token(TokenKind::Colon, start);
+                    }
                 }
                 ',' => {
                     let start = self.current_position();
@@ -153,7 +157,9 @@ impl Lexer {
                 '<' => {
                     let start = self.current_position();
                     self.advance_char();
-                    if self.consume_char('=') {
+                    if self.consume_char('<') {
+                        self.push_token(TokenKind::Operator(Operator::LeftShift), start);
+                    } else if self.consume_char('=') {
                         self.push_token(TokenKind::Operator(Operator::LtEq), start);
                     } else {
                         self.push_token(TokenKind::Operator(Operator::Lt), start);
@@ -162,7 +168,9 @@ impl Lexer {
                 '>' => {
                     let start = self.current_position();
                     self.advance_char();
-                    if self.consume_char('=') {
+                    if self.consume_char('>') {
+                        self.push_token(TokenKind::Operator(Operator::RightShift), start);
+                    } else if self.consume_char('=') {
                         self.push_token(TokenKind::Operator(Operator::GtEq), start);
                     } else {
                         self.push_token(TokenKind::Operator(Operator::Gt), start);
@@ -223,6 +231,26 @@ impl Lexer {
                     let start = self.current_position();
                     self.advance_char();
                     self.push_token(TokenKind::Operator(Operator::At), start);
+                }
+                '&' => {
+                    let start = self.current_position();
+                    self.advance_char();
+                    self.push_token(TokenKind::Operator(Operator::Ampersand), start);
+                }
+                '|' => {
+                    let start = self.current_position();
+                    self.advance_char();
+                    self.push_token(TokenKind::Operator(Operator::Pipe), start);
+                }
+                '^' => {
+                    let start = self.current_position();
+                    self.advance_char();
+                    self.push_token(TokenKind::Operator(Operator::Caret), start);
+                }
+                '~' => {
+                    let start = self.current_position();
+                    self.advance_char();
+                    self.push_token(TokenKind::Operator(Operator::Tilde), start);
                 }
                 _ => {
                     return Err(self.error(format!("unexpected character '{current}'")));
@@ -405,6 +433,9 @@ impl Lexer {
             "del" => TokenKind::Keyword(Keyword::Del),
             "global" => TokenKind::Keyword(Keyword::Global),
             "nonlocal" => TokenKind::Keyword(Keyword::Nonlocal),
+            "yield" => TokenKind::Keyword(Keyword::Yield),
+            "async" => TokenKind::Keyword(Keyword::Async),
+            "await" => TokenKind::Keyword(Keyword::Await),
             _ => TokenKind::Identifier(raw),
         };
         self.push_token(kind, start);

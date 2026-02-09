@@ -14,6 +14,7 @@ import type {
   expr,
   ir_block,
   ir_case_block,
+  ir_context_item,
   ir_elif_stmt,
   ir_func_param,
   ir_match_case,
@@ -23,6 +24,7 @@ import type {
   literal,
   node_meta,
   pattern,
+  range_block,
   span,
   tuple_block,
   unary_op,
@@ -34,6 +36,8 @@ import type {
   class_def_block,
   import_block,
   fstring_part,
+  with_block,
+  zip_block,
 } from "./types";
 import {
   block_type_assign,
@@ -90,6 +94,21 @@ import {
   block_type_global_stmt,
   block_type_nonlocal_stmt,
   block_type_ann_assign,
+  block_type_named_expr,
+  block_type_yield_expr,
+  block_type_yield_from_expr,
+  block_type_await_expr,
+  block_type_range,
+  block_type_len,
+  block_type_input,
+  block_type_type_convert,
+  block_type_enumerate,
+  block_type_zip,
+  block_type_sorted,
+  block_type_reversed,
+  block_type_math_func,
+  block_type_isinstance,
+  block_type_type_check,
 } from "./blockly_config";
 
 let workspace: Blockly.WorkspaceSvg | null = null;
@@ -181,18 +200,26 @@ const collect_max_id_stmt = (stmt: ir_stmt): number => {
       }
       return max_id;
     case "While":
-      return Math.max(
+      max_id = Math.max(
         max_id,
         collect_max_id_expr(stmt.data.condition),
         collect_max_id_block(stmt.data.body),
       );
+      if (stmt.data.else_body) {
+        max_id = Math.max(max_id, collect_max_id_block(stmt.data.else_body));
+      }
+      return max_id;
     case "For":
-      return Math.max(
+      max_id = Math.max(
         max_id,
         collect_max_id_expr(stmt.data.target),
         collect_max_id_expr(stmt.data.iterable),
         collect_max_id_block(stmt.data.body),
       );
+      if (stmt.data.else_body) {
+        max_id = Math.max(max_id, collect_max_id_block(stmt.data.else_body));
+      }
+      return max_id;
     case "Match":
       max_id = Math.max(max_id, collect_max_id_expr(stmt.data.subject));
       max_id = Math.max(max_id, collect_max_id_case_block(stmt.data.cases));
@@ -209,17 +236,20 @@ const collect_max_id_stmt = (stmt: ir_stmt): number => {
         if (p.annotation) {
           max_id = Math.max(max_id, collect_max_id_expr(p.annotation));
         }
+        if (p.default_value) {
+          max_id = Math.max(max_id, collect_max_id_expr(p.default_value));
+        }
       });
       if (stmt.data.return_type) {
         max_id = Math.max(max_id, collect_max_id_expr(stmt.data.return_type));
       }
       return max_id;
     case "Assign":
-      return Math.max(
-        max_id,
-        collect_max_id_expr(stmt.data.target),
-        collect_max_id_expr(stmt.data.value),
-      );
+      max_id = Math.max(max_id, collect_max_id_expr(stmt.data.value));
+      stmt.data.targets.forEach((t) => {
+        max_id = Math.max(max_id, collect_max_id_expr(t));
+      });
+      return max_id;
     case "Expr":
       return Math.max(max_id, collect_max_id_expr(stmt.data.expr));
     case "Pass":
@@ -250,6 +280,9 @@ const collect_max_id_stmt = (stmt: ir_stmt): number => {
         }
         max_id = Math.max(max_id, collect_max_id_block(handler.body));
       });
+      if (stmt.data.else_body) {
+        max_id = Math.max(max_id, collect_max_id_block(stmt.data.else_body));
+      }
       if (stmt.data.finally_body) {
         max_id = Math.max(max_id, collect_max_id_block(stmt.data.finally_body));
       }
@@ -264,7 +297,9 @@ const collect_max_id_stmt = (stmt: ir_stmt): number => {
       });
       return max_id;
     case "With":
-      max_id = Math.max(max_id, collect_max_id_expr(stmt.data.context));
+      stmt.data.items.forEach((item) => {
+        max_id = Math.max(max_id, collect_max_id_expr(item.context));
+      });
       stmt.data.body.forEach((s) => {
         max_id = Math.max(max_id, collect_max_id_stmt(s));
       });
@@ -483,6 +518,26 @@ const collect_max_id_expr = (expression: expr): number => {
       });
       return max_id;
     }
+    case "NamedExpr":
+      return Math.max(
+        expression.data.meta.id,
+        collect_max_id_expr(expression.data.value),
+      );
+    case "Yield":
+      return Math.max(
+        expression.data.meta.id,
+        expression.data.value ? collect_max_id_expr(expression.data.value) : 0,
+      );
+    case "YieldFrom":
+      return Math.max(
+        expression.data.meta.id,
+        collect_max_id_expr(expression.data.value),
+      );
+    case "Await":
+      return Math.max(
+        expression.data.meta.id,
+        collect_max_id_expr(expression.data.value),
+      );
   }
 };
 
@@ -598,6 +653,9 @@ const create_statement_blocks_inner = (statement: ir_stmt) => {
     const block = workspace.newBlock(block_type_while);
     attach_expr_input(block, "COND", statement.data.condition);
     attach_statement_body(block, "BODY", statement.data.body.statements);
+    if (statement.data.else_body) {
+      attach_statement_body(block, "ELSE_BODY", statement.data.else_body.statements);
+    }
     init_block(block);
     return { first: block, last: block };
   }
@@ -605,7 +663,13 @@ const create_statement_blocks_inner = (statement: ir_stmt) => {
     const block = workspace.newBlock(block_type_for);
     attach_expr_input(block, "TARGET", statement.data.target);
     attach_expr_input(block, "ITER", statement.data.iterable);
+    if (statement.data.is_async) {
+      block.setFieldValue("TRUE", "IS_ASYNC");
+    }
     attach_statement_body(block, "BODY", statement.data.body.statements);
+    if (statement.data.else_body) {
+      attach_statement_body(block, "ELSE_BODY", statement.data.else_body.statements);
+    }
     init_block(block);
     return { first: block, last: block };
   }
@@ -630,28 +694,48 @@ const create_statement_blocks_inner = (statement: ir_stmt) => {
     block.updateShape_();
     block.setFieldValue(String(statement.data.params.length), "ARG_COUNT");
     statement.data.params.forEach((param, index) => {
-      const param_text = param.annotation
-        ? `${param.name}: ${render_expr_text(param.annotation)}`
-        : param.name;
+      const prefix = param.kind === "star" ? "*" : param.kind === "double_star" ? "**" : "";
+      let param_text = `${prefix}${param.name}`;
+      if (param.annotation) {
+        param_text += `: ${render_expr_text(param.annotation)}`;
+      }
+      if (param.default_value) {
+        param_text += ` = ${render_expr_text(param.default_value)}`;
+      }
       block.setFieldValue(param_text, `PARAM${index}`);
     });
     if (statement.data.return_type) {
       block.setFieldValue(render_expr_text(statement.data.return_type), "RETURN_TYPE");
+    }
+    if (statement.data.is_async) {
+      block.setFieldValue("TRUE", "IS_ASYNC");
     }
     attach_statement_body(block, "BODY", statement.data.body.statements);
     init_block(block);
     return { first: block, last: block };
   }
   if (statement.kind === "Assign") {
-    if (statement.data.target.kind === "Identifier") {
+    if (statement.data.targets.length === 1 && statement.data.targets[0].kind === "Identifier") {
       const block = workspace.newBlock(block_type_var_set);
-      block.setFieldValue(statement.data.target.data.name, "name");
+      block.setFieldValue(statement.data.targets[0].data.name, "name");
       attach_expr_input(block, "VALUE", statement.data.value);
       init_block(block);
       return { first: block, last: block };
     }
     const block = workspace.newBlock(block_type_assign);
-    attach_expr_input(block, "TARGET", statement.data.target);
+    if (statement.data.targets.length === 1) {
+      attach_expr_input(block, "TARGET", statement.data.targets[0]);
+    } else {
+      // Multiple targets: wrap as a Tuple expression for the block
+      const tuple_expr: expr = {
+        kind: "Tuple",
+        data: {
+          meta: statement.data.meta,
+          elements: statement.data.targets,
+        },
+      };
+      attach_expr_input(block, "TARGET", tuple_expr);
+    }
     attach_expr_input(block, "VALUE", statement.data.value);
     init_block(block);
     return { first: block, last: block };
@@ -755,6 +839,9 @@ const create_statement_blocks_inner = (statement: ir_stmt) => {
       }
       attach_statement_body(block, `EXCEPT_BODY${index}`, handler.body.statements);
     });
+    if (statement.data.else_body) {
+      attach_statement_body(block, "ELSE_BODY", statement.data.else_body.statements);
+    }
     if (statement.data.finally_body) {
       attach_statement_body(block, "FINALLY_BODY", statement.data.finally_body.statements);
     }
@@ -782,12 +869,21 @@ const create_statement_blocks_inner = (statement: ir_stmt) => {
     return { first: block, last: block };
   }
   if (statement.kind === "With") {
-    const block = workspace.newBlock(block_type_with_block);
-    block.setFieldValue(statement.data.name ?? "", "NAME");
-    attach_expr_input(block, "CONTEXT", statement.data.context);
-    attach_statement_body(block, "BODY", statement.data.body);
-    init_block(block);
-    return { first: block, last: block };
+    const block = workspace.newBlock(block_type_with_block) as unknown as with_block;
+    const count = statement.data.items.length;
+    block.itemCount_ = count;
+    block.updateShape_();
+    block.setFieldValue(String(count), "COUNT");
+    if (statement.data.is_async) {
+      block.setFieldValue("TRUE", "IS_ASYNC");
+    }
+    statement.data.items.forEach((item, index) => {
+      block.setFieldValue(item.name ?? "", `NAME${index}`);
+      attach_expr_input(block as unknown as Blockly.Block, `CONTEXT${index}`, item.context);
+    });
+    attach_statement_body(block as unknown as Blockly.Block, "BODY", statement.data.body);
+    init_block(block as unknown as Blockly.Block);
+    return { first: block as unknown as Blockly.Block, last: block as unknown as Blockly.Block };
   }
   if (statement.kind === "Assert") {
     const block = workspace.newBlock(block_type_assert_stmt);
@@ -985,6 +1081,114 @@ const create_expr_block = (expression: expr): Blockly.Block | null => {
         init_block(block);
         return block;
       }
+      if (expression.data.callee.kind === "Identifier") {
+        const fname = expression.data.callee.data.name;
+        const args = expression.data.args;
+        // range(stop) / range(start, stop) / range(start, stop, step)
+        if (fname === "range" && args.length >= 1 && args.length <= 3) {
+          const block = workspace.newBlock(block_type_range) as unknown as range_block;
+          block.itemCount_ = args.length;
+          block.updateShape_();
+          block.setFieldValue(String(args.length), "COUNT");
+          if (args.length === 1) {
+            attach_expr_input(block, "STOP", args[0]);
+          } else if (args.length === 2) {
+            attach_expr_input(block, "START", args[0]);
+            attach_expr_input(block, "STOP", args[1]);
+          } else {
+            attach_expr_input(block, "START", args[0]);
+            attach_expr_input(block, "STOP", args[1]);
+            attach_expr_input(block, "STEP", args[2]);
+          }
+          init_block(block);
+          return block;
+        }
+        // len(obj)
+        if (fname === "len" && args.length === 1) {
+          const block = workspace.newBlock(block_type_len);
+          attach_expr_input(block, "OBJ", args[0]);
+          init_block(block);
+          return block;
+        }
+        // input() / input(prompt)
+        if (fname === "input" && args.length <= 1) {
+          const block = workspace.newBlock(block_type_input);
+          if (args.length === 1) {
+            attach_expr_input(block, "PROMPT", args[0]);
+          }
+          init_block(block);
+          return block;
+        }
+        // type conversion: int, float, str, bool, list, tuple, dict, set
+        const type_convert_names = ["int", "float", "str", "bool", "list", "tuple", "dict", "set"];
+        if (type_convert_names.includes(fname) && args.length === 1) {
+          const block = workspace.newBlock(block_type_type_convert);
+          block.setFieldValue(fname, "TYPE");
+          attach_expr_input(block, "VALUE", args[0]);
+          init_block(block);
+          return block;
+        }
+        // enumerate(iterable) / enumerate(iterable, start)
+        if (fname === "enumerate" && args.length >= 1 && args.length <= 2) {
+          const block = workspace.newBlock(block_type_enumerate);
+          attach_expr_input(block, "ITERABLE", args[0]);
+          if (args.length === 2) {
+            attach_expr_input(block, "START", args[1]);
+          }
+          init_block(block);
+          return block;
+        }
+        // zip(iter1, iter2, ...)
+        if (fname === "zip" && args.length >= 2) {
+          const block = workspace.newBlock(block_type_zip) as unknown as zip_block;
+          block.itemCount_ = args.length;
+          block.updateShape_();
+          block.setFieldValue(String(args.length), "COUNT");
+          args.forEach((arg, index) => {
+            attach_expr_input(block, `ITER${index}`, arg);
+          });
+          init_block(block);
+          return block;
+        }
+        // sorted(iterable)
+        if (fname === "sorted" && args.length === 1) {
+          const block = workspace.newBlock(block_type_sorted);
+          attach_expr_input(block, "ITERABLE", args[0]);
+          init_block(block);
+          return block;
+        }
+        // reversed(iterable)
+        if (fname === "reversed" && args.length === 1) {
+          const block = workspace.newBlock(block_type_reversed);
+          attach_expr_input(block, "ITERABLE", args[0]);
+          init_block(block);
+          return block;
+        }
+        // math functions: abs, min, max, sum
+        const math_func_names = ["abs", "min", "max", "sum"];
+        if (math_func_names.includes(fname) && args.length === 1) {
+          const block = workspace.newBlock(block_type_math_func);
+          block.setFieldValue(fname, "FUNC");
+          attach_expr_input(block, "VALUE", args[0]);
+          init_block(block);
+          return block;
+        }
+        // isinstance(obj, type)
+        if (fname === "isinstance" && args.length === 2) {
+          const block = workspace.newBlock(block_type_isinstance);
+          attach_expr_input(block, "OBJ", args[0]);
+          attach_expr_input(block, "TYPE", args[1]);
+          init_block(block);
+          return block;
+        }
+        // type(obj)
+        if (fname === "type" && args.length === 1) {
+          const block = workspace.newBlock(block_type_type_check);
+          attach_expr_input(block, "OBJ", args[0]);
+          init_block(block);
+          return block;
+        }
+      }
       const block = workspace.newBlock(block_type_call) as unknown as call_block;
       const args_count = expression.data.args.length;
       block.itemCount_ = args_count;
@@ -1122,6 +1326,33 @@ const create_expr_block = (expression: expr): Blockly.Block | null => {
       init_block(block);
       return block;
     }
+    case "NamedExpr": {
+      const block = workspace.newBlock(block_type_named_expr);
+      block.setFieldValue(expression.data.name, "NAME");
+      attach_expr_input(block, "VALUE", expression.data.value);
+      init_block(block);
+      return block;
+    }
+    case "Yield": {
+      const block = workspace.newBlock(block_type_yield_expr);
+      if (expression.data.value) {
+        attach_expr_input(block, "VALUE", expression.data.value);
+      }
+      init_block(block);
+      return block;
+    }
+    case "YieldFrom": {
+      const block = workspace.newBlock(block_type_yield_from_expr);
+      attach_expr_input(block, "VALUE", expression.data.value);
+      init_block(block);
+      return block;
+    }
+    case "Await": {
+      const block = workspace.newBlock(block_type_await_expr);
+      attach_expr_input(block, "VALUE", expression.data.value);
+      init_block(block);
+      return block;
+    }
     default:
       return null;
   }
@@ -1181,7 +1412,7 @@ export const ir_from_blocks = (): ir_program => {
   if (!workspace) {
     return {
       meta: make_meta(),
-      indent_width: 4,
+      indent_width: 2,
       body: [],
       token_store: null,
       dirty: true,
@@ -1207,7 +1438,7 @@ export const ir_from_blocks = (): ir_program => {
     );
     return {
       meta: make_meta(),
-      indent_width: 4,
+      indent_width: 2,
       body: statements,
       token_store: null,
       dirty: true,
@@ -1223,7 +1454,7 @@ export const ir_from_blocks = (): ir_program => {
   });
   return {
     meta: make_meta(),
-    indent_width: 4,
+    indent_width: 2,
     body: statements,
     token_store: null,
     dirty: true,
@@ -1301,16 +1532,20 @@ const block_from_statements = (start_block: Blockly.Block | null): ir_block => (
 
 const statement_from_block = (block: Blockly.Block): ir_stmt => {
   switch (block.type) {
-    case block_type_while:
+    case block_type_while: {
+      const else_target = block.getInputTargetBlock("ELSE_BODY");
       return {
         kind: "While",
         data: {
           meta: make_meta(),
           condition: expr_from_input(block, "COND"),
           body: block_from_statements(block.getInputTargetBlock("BODY")),
+          else_body: else_target ? block_from_statements(else_target) : null,
         },
       };
-    case block_type_for:
+    }
+    case block_type_for: {
+      const else_target = block.getInputTargetBlock("ELSE_BODY");
       return {
         kind: "For",
         data: {
@@ -1318,8 +1553,11 @@ const statement_from_block = (block: Blockly.Block): ir_stmt => {
           target: expr_from_input(block, "TARGET"),
           iterable: expr_from_input(block, "ITER"),
           body: block_from_statements(block.getInputTargetBlock("BODY")),
+          else_body: else_target ? block_from_statements(else_target) : null,
+          is_async: block.getFieldValue("IS_ASYNC") === "TRUE",
         },
       };
+    }
     case block_type_match:
       return {
         kind: "Match",
@@ -1334,8 +1572,25 @@ const statement_from_block = (block: Blockly.Block): ir_stmt => {
       const count = def_block.itemCount_;
       const params: ir_func_param[] = [];
       for (let index = 0; index < count; index += 1) {
-        const raw = (def_block.getFieldValue(`PARAM${index}`) ?? "").trim();
+        let raw = (def_block.getFieldValue(`PARAM${index}`) ?? "").trim();
         if (raw.length > 0) {
+          let kind: "normal" | "star" | "double_star" = "normal";
+          if (raw.startsWith("**")) {
+            kind = "double_star";
+            raw = raw.substring(2).trim();
+          } else if (raw.startsWith("*")) {
+            kind = "star";
+            raw = raw.substring(1).trim();
+          }
+          let default_value: expr | null = null;
+          const eq_index = raw.indexOf("=");
+          if (eq_index >= 0) {
+            const def_text = raw.substring(eq_index + 1).trim();
+            raw = raw.substring(0, eq_index).trim();
+            if (def_text.length > 0) {
+              default_value = { kind: "Identifier", data: { meta: make_meta(), name: def_text } };
+            }
+          }
           const colon_index = raw.indexOf(":");
           if (colon_index >= 0) {
             const param_name = raw.substring(0, colon_index).trim();
@@ -1345,9 +1600,11 @@ const statement_from_block = (block: Blockly.Block): ir_stmt => {
               annotation: ann_text.length > 0
                 ? { kind: "Identifier", data: { meta: make_meta(), name: ann_text } }
                 : null,
+              default_value,
+              kind,
             });
           } else {
-            params.push({ name: raw, annotation: null });
+            params.push({ name: raw, annotation: null, default_value, kind });
           }
         }
       }
@@ -1364,6 +1621,7 @@ const statement_from_block = (block: Blockly.Block): ir_stmt => {
           decorators: parse_decorators_field(def_block.getFieldValue("DECORATORS") ?? ""),
           body: block_from_statements(block.getInputTargetBlock("BODY")),
           return_type,
+          is_async: def_block.getFieldValue("IS_ASYNC") === "TRUE",
         },
       };
     }
@@ -1410,22 +1668,27 @@ const statement_from_block = (block: Blockly.Block): ir_stmt => {
         kind: "Assign",
         data: {
           meta: make_meta(),
-          target: {
+          targets: [{
             kind: "Identifier",
             data: { meta: make_meta(), name: block.getFieldValue("name") ?? "" },
-          },
+          }],
           value: expr_from_input(block, "VALUE"),
         },
       };
-    case block_type_assign:
+    case block_type_assign: {
+      const target_expr = expr_from_input(block, "TARGET");
+      const targets: expr[] = target_expr.kind === "Tuple"
+        ? target_expr.data.elements
+        : [target_expr];
       return {
         kind: "Assign",
         data: {
           meta: make_meta(),
-          target: expr_from_input(block, "TARGET"),
+          targets,
           value: expr_from_input(block, "VALUE"),
         },
       };
+    }
     case block_type_ann_assign: {
       const value_block = block.getInputTargetBlock("VALUE");
       const ann_text = (block.getFieldValue("ANNOTATION") ?? "int").trim();
@@ -1523,6 +1786,7 @@ const statement_from_block = (block: Blockly.Block): ir_stmt => {
           body: block_from_statements(block.getInputTargetBlock(`EXCEPT_BODY${i}`)),
         });
       }
+      const else_target = block.getInputTargetBlock("ELSE_BODY");
       const finally_target = block.getInputTargetBlock("FINALLY_BODY");
       return {
         kind: "Try",
@@ -1530,6 +1794,7 @@ const statement_from_block = (block: Blockly.Block): ir_stmt => {
           meta: make_meta(),
           body: block_from_statements(block.getInputTargetBlock("BODY")),
           handlers,
+          else_body: else_target ? block_from_statements(else_target) : null,
           finally_body: finally_target ? block_from_statements(finally_target) : null,
         },
       };
@@ -1553,14 +1818,22 @@ const statement_from_block = (block: Blockly.Block): ir_stmt => {
       };
     }
     case block_type_with_block: {
-      const name_val = block.getFieldValue("NAME") as string;
+      const wb = block as unknown as with_block;
+      const items: ir_context_item[] = [];
+      for (let i = 0; i < wb.itemCount_; i += 1) {
+        const name_val = wb.getFieldValue(`NAME${i}`) as string;
+        items.push({
+          context: expr_from_input(block, `CONTEXT${i}`),
+          name: name_val && name_val.trim() !== "" ? name_val.trim() : null,
+        });
+      }
       return {
         kind: "With",
         data: {
           meta: make_meta(),
-          context: expr_from_input(block, "CONTEXT"),
-          name: name_val && name_val.trim() !== "" ? name_val.trim() : null,
+          items,
           body: statements_from_chain(block.getInputTargetBlock("BODY")),
+          is_async: wb.getFieldValue("IS_ASYNC") === "TRUE",
         },
       };
     }
@@ -1820,6 +2093,158 @@ const expr_from_block = (block: Blockly.Block): expr => {
           kwargs: [],
         },
       };
+    case block_type_range: {
+      const rb = block as unknown as range_block;
+      const range_args: expr[] = [];
+      if (rb.itemCount_ === 1) {
+        range_args.push(expr_from_input(block, "STOP"));
+      } else if (rb.itemCount_ === 2) {
+        range_args.push(expr_from_input(block, "START"));
+        range_args.push(expr_from_input(block, "STOP"));
+      } else {
+        range_args.push(expr_from_input(block, "START"));
+        range_args.push(expr_from_input(block, "STOP"));
+        range_args.push(expr_from_input(block, "STEP"));
+      }
+      return {
+        kind: "Call",
+        data: {
+          meta: make_meta(),
+          callee: { kind: "Identifier", data: { meta: make_meta(), name: "range" } },
+          args: range_args,
+          kwargs: [],
+        },
+      };
+    }
+    case block_type_len:
+      return {
+        kind: "Call",
+        data: {
+          meta: make_meta(),
+          callee: { kind: "Identifier", data: { meta: make_meta(), name: "len" } },
+          args: [expr_from_input(block, "OBJ")],
+          kwargs: [],
+        },
+      };
+    case block_type_input: {
+      const input_args: expr[] = [];
+      const prompt_target = block.getInputTargetBlock("PROMPT");
+      if (prompt_target) {
+        input_args.push(expr_from_block(prompt_target));
+      }
+      return {
+        kind: "Call",
+        data: {
+          meta: make_meta(),
+          callee: { kind: "Identifier", data: { meta: make_meta(), name: "input" } },
+          args: input_args,
+          kwargs: [],
+        },
+      };
+    }
+    case block_type_type_convert:
+      return {
+        kind: "Call",
+        data: {
+          meta: make_meta(),
+          callee: {
+            kind: "Identifier",
+            data: { meta: make_meta(), name: block.getFieldValue("TYPE") ?? "int" },
+          },
+          args: [expr_from_input(block, "VALUE")],
+          kwargs: [],
+        },
+      };
+    case block_type_enumerate: {
+      const enum_args: expr[] = [expr_from_input(block, "ITERABLE")];
+      const start_target = block.getInputTargetBlock("START");
+      if (start_target) {
+        enum_args.push(expr_from_block(start_target));
+      }
+      return {
+        kind: "Call",
+        data: {
+          meta: make_meta(),
+          callee: { kind: "Identifier", data: { meta: make_meta(), name: "enumerate" } },
+          args: enum_args,
+          kwargs: [],
+        },
+      };
+    }
+    case block_type_zip: {
+      const zb = block as unknown as zip_block;
+      const zip_args: expr[] = [];
+      for (let i = 0; i < zb.itemCount_; i += 1) {
+        const input = zb.getInput(`ITER${i}`);
+        if (!input?.connection?.targetBlock()) {
+          zip_args.push(default_identifier_expr());
+        } else {
+          zip_args.push(expr_from_block(input.connection.targetBlock() as Blockly.Block));
+        }
+      }
+      return {
+        kind: "Call",
+        data: {
+          meta: make_meta(),
+          callee: { kind: "Identifier", data: { meta: make_meta(), name: "zip" } },
+          args: zip_args,
+          kwargs: [],
+        },
+      };
+    }
+    case block_type_sorted:
+      return {
+        kind: "Call",
+        data: {
+          meta: make_meta(),
+          callee: { kind: "Identifier", data: { meta: make_meta(), name: "sorted" } },
+          args: [expr_from_input(block, "ITERABLE")],
+          kwargs: [],
+        },
+      };
+    case block_type_reversed:
+      return {
+        kind: "Call",
+        data: {
+          meta: make_meta(),
+          callee: { kind: "Identifier", data: { meta: make_meta(), name: "reversed" } },
+          args: [expr_from_input(block, "ITERABLE")],
+          kwargs: [],
+        },
+      };
+    case block_type_math_func:
+      return {
+        kind: "Call",
+        data: {
+          meta: make_meta(),
+          callee: {
+            kind: "Identifier",
+            data: { meta: make_meta(), name: block.getFieldValue("FUNC") ?? "abs" },
+          },
+          args: [expr_from_input(block, "VALUE")],
+          kwargs: [],
+        },
+      };
+    case block_type_isinstance:
+      return {
+        kind: "Call",
+        data: {
+          meta: make_meta(),
+          callee: { kind: "Identifier", data: { meta: make_meta(), name: "isinstance" } },
+          args: [expr_from_input(block, "OBJ"), expr_from_input(block, "TYPE")],
+          kwargs: [],
+        },
+      };
+    case block_type_type_check:
+      return {
+        kind: "Call",
+        data: {
+          meta: make_meta(),
+          callee: { kind: "Identifier", data: { meta: make_meta(), name: "type" } },
+          args: [expr_from_input(block, "OBJ")],
+          kwargs: [],
+        },
+      };
     case block_type_call: {
       const call_block = block as unknown as call_block;
       const args: expr[] = [];
@@ -2043,6 +2468,41 @@ const expr_from_block = (block: Blockly.Block): expr => {
         },
       };
     }
+    case block_type_named_expr:
+      return {
+        kind: "NamedExpr",
+        data: {
+          meta: make_meta(),
+          name: block.getFieldValue("NAME") ?? "",
+          value: expr_from_input(block, "VALUE"),
+        },
+      };
+    case block_type_yield_expr: {
+      const value_block = block.getInputTargetBlock("VALUE");
+      return {
+        kind: "Yield",
+        data: {
+          meta: make_meta(),
+          value: value_block ? expr_from_block(value_block) : null,
+        },
+      };
+    }
+    case block_type_yield_from_expr:
+      return {
+        kind: "YieldFrom",
+        data: {
+          meta: make_meta(),
+          value: expr_from_input(block, "VALUE"),
+        },
+      };
+    case block_type_await_expr:
+      return {
+        kind: "Await",
+        data: {
+          meta: make_meta(),
+          value: expr_from_input(block, "VALUE"),
+        },
+      };
     default:
       throw new Error("未対応の式");
   }

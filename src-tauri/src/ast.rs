@@ -169,6 +169,8 @@ pub struct WhileStmt {
     pub meta: NodeMeta,
     pub condition: Expr,
     pub body: Block,
+    #[serde(default)]
+    pub else_body: Option<Block>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,6 +180,10 @@ pub struct ForStmt {
     pub target: Expr,
     pub iterable: Expr,
     pub body: Block,
+    #[serde(default)]
+    pub else_body: Option<Block>,
+    #[serde(default)]
+    pub is_async: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -215,6 +221,22 @@ pub struct FunctionDefStmt {
     pub body: Block,
     #[serde(default)]
     pub return_type: Option<Expr>,
+    #[serde(default)]
+    pub is_async: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ParamKind {
+    Normal,
+    Star,
+    DoubleStar,
+}
+
+impl Default for ParamKind {
+    fn default() -> Self {
+        ParamKind::Normal
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -222,6 +244,10 @@ pub struct FuncParam {
     pub name: String,
     #[serde(default)]
     pub annotation: Option<Expr>,
+    #[serde(default)]
+    pub default: Option<Expr>,
+    #[serde(default)]
+    pub kind: ParamKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -239,7 +265,7 @@ pub struct ClassDefStmt {
 pub struct AssignStmt {
     #[serde(default)]
     pub meta: NodeMeta,
-    pub target: Expr,
+    pub targets: Vec<Expr>,
     pub value: Expr,
 }
 
@@ -312,6 +338,8 @@ pub struct TryStmt {
     pub meta: NodeMeta,
     pub body: Block,
     pub handlers: Vec<ExceptHandler>,
+    #[serde(default)]
+    pub else_body: Option<Block>,
     pub finally_body: Option<Block>,
 }
 
@@ -325,12 +353,19 @@ pub struct ExceptHandler {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextItem {
+    pub context: Expr,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WithStmt {
     #[serde(default)]
     pub meta: NodeMeta,
-    pub context: Expr,
-    pub name: Option<String>,
+    pub items: Vec<ContextItem>,
     pub body: Block,
+    #[serde(default)]
+    pub is_async: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -409,6 +444,10 @@ pub enum Expr {
     Set(SetExpr),
     Comprehension(ComprehensionExpr),
     FString(FStringExpr),
+    NamedExpr(NamedExprData),
+    Yield(YieldExprData),
+    YieldFrom(YieldFromExprData),
+    Await(AwaitExprData),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -424,6 +463,35 @@ pub struct FStringExpr {
 pub enum FStringPart {
     Literal(String),
     Expr(Expr),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NamedExprData {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub name: String,
+    pub value: Box<Expr>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct YieldExprData {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub value: Option<Box<Expr>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct YieldFromExprData {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub value: Box<Expr>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AwaitExprData {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub value: Box<Expr>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -636,14 +704,23 @@ pub enum BinaryOp {
     Mod,
     FloorDiv,
     Power,
+    BitAnd,
+    BitOr,
+    BitXor,
+    LeftShift,
+    RightShift,
 }
 
 impl BinaryOp {
     fn precedence(&self) -> u8 {
         match self {
-            BinaryOp::Add | BinaryOp::Sub => 5,
-            BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod | BinaryOp::FloorDiv => 6,
-            BinaryOp::Power => 7,
+            BinaryOp::BitOr => 5,
+            BinaryOp::BitXor => 6,
+            BinaryOp::BitAnd => 7,
+            BinaryOp::LeftShift | BinaryOp::RightShift => 8,
+            BinaryOp::Add | BinaryOp::Sub => 9,
+            BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod | BinaryOp::FloorDiv => 10,
+            BinaryOp::Power => 11,
         }
     }
 }
@@ -653,6 +730,7 @@ impl BinaryOp {
 pub enum UnaryOp {
     Neg,
     Not,
+    BitNot,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -805,6 +883,8 @@ pub struct IrWhileStmt {
     pub meta: NodeMeta,
     pub condition: IrExpr,
     pub body: IrBlock,
+    #[serde(default)]
+    pub else_body: Option<IrBlock>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -814,6 +894,10 @@ pub struct IrForStmt {
     pub target: IrExpr,
     pub iterable: IrExpr,
     pub body: IrBlock,
+    #[serde(default)]
+    pub else_body: Option<IrBlock>,
+    #[serde(default)]
+    pub is_async: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -851,6 +935,8 @@ pub struct IrFunctionDefStmt {
     pub body: IrBlock,
     #[serde(default)]
     pub return_type: Option<IrExpr>,
+    #[serde(default)]
+    pub is_async: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -858,6 +944,10 @@ pub struct IrFuncParam {
     pub name: String,
     #[serde(default)]
     pub annotation: Option<IrExpr>,
+    #[serde(default, rename = "default_value")]
+    pub default: Option<IrExpr>,
+    #[serde(default)]
+    pub kind: ParamKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -875,7 +965,7 @@ pub struct IrClassDefStmt {
 pub struct IrAssignStmt {
     #[serde(default)]
     pub meta: NodeMeta,
-    pub target: IrExpr,
+    pub targets: Vec<IrExpr>,
     pub value: IrExpr,
 }
 
@@ -942,6 +1032,8 @@ pub struct IrTryStmt {
     pub meta: NodeMeta,
     pub body: IrBlock,
     pub handlers: Vec<IrExceptHandler>,
+    #[serde(default)]
+    pub else_body: Option<IrBlock>,
     pub finally_body: Option<IrBlock>,
 }
 
@@ -955,12 +1047,19 @@ pub struct IrExceptHandler {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrContextItem {
+    pub context: IrExpr,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrWithStmt {
     #[serde(default)]
     pub meta: NodeMeta,
-    pub context: IrExpr,
-    pub name: Option<String>,
+    pub items: Vec<IrContextItem>,
     pub body: IrBlock,
+    #[serde(default)]
+    pub is_async: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1039,6 +1138,10 @@ pub enum IrExpr {
     Set(IrSetExpr),
     Comprehension(IrComprehensionExpr),
     FString(IrFStringExpr),
+    NamedExpr(IrNamedExprData),
+    Yield(IrYieldExprData),
+    YieldFrom(IrYieldFromExprData),
+    Await(IrAwaitExprData),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1054,6 +1157,35 @@ pub struct IrFStringExpr {
 pub enum IrFStringPart {
     Literal(String),
     Expr(IrExpr),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrNamedExprData {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub name: String,
+    pub value: Box<IrExpr>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrYieldExprData {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub value: Option<Box<IrExpr>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrYieldFromExprData {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub value: Box<IrExpr>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrAwaitExprData {
+    #[serde(default)]
+    pub meta: NodeMeta,
+    pub value: Box<IrExpr>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1350,6 +1482,9 @@ pub enum Keyword {
     Del,
     Global,
     Nonlocal,
+    Yield,
+    Async,
+    Await,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -1376,6 +1511,13 @@ pub enum Operator {
     Power,
     At,
     Arrow,
+    Ampersand,
+    Pipe,
+    Caret,
+    Tilde,
+    LeftShift,
+    RightShift,
+    ColonAssign,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -1591,13 +1733,20 @@ fn ir_contains_match(stmt: &IrStmt) -> bool {
                     .map(block_has_match)
                     .unwrap_or(false)
         }
-        IrStmt::While(stmt) => block_has_match(&stmt.body),
-        IrStmt::For(stmt) => block_has_match(&stmt.body),
+        IrStmt::While(stmt) => block_has_match(&stmt.body)
+            || stmt.else_body.as_ref().map(block_has_match).unwrap_or(false),
+        IrStmt::For(stmt) => block_has_match(&stmt.body)
+            || stmt.else_body.as_ref().map(block_has_match).unwrap_or(false),
         IrStmt::FunctionDef(stmt) => block_has_match(&stmt.body),
         IrStmt::ClassDef(stmt) => block_has_match(&stmt.body),
         IrStmt::Try(stmt) => {
             block_has_match(&stmt.body)
                 || stmt.handlers.iter().any(|h| block_has_match(&h.body))
+                || stmt
+                    .else_body
+                    .as_ref()
+                    .map(block_has_match)
+                    .unwrap_or(false)
                 || stmt
                     .finally_body
                     .as_ref()
@@ -1634,12 +1783,15 @@ fn stmt_to_ir(stmt: &Stmt) -> IrStmt {
             meta: stmt.meta.clone(),
             condition: expr_to_ir(&stmt.condition),
             body: block_to_ir(&stmt.body),
+            else_body: stmt.else_body.as_ref().map(block_to_ir),
         }),
         Stmt::For(stmt) => IrStmt::For(IrForStmt {
             meta: stmt.meta.clone(),
             target: expr_to_ir(&stmt.target),
             iterable: expr_to_ir(&stmt.iterable),
             body: block_to_ir(&stmt.body),
+            else_body: stmt.else_body.as_ref().map(block_to_ir),
+            is_async: stmt.is_async,
         }),
         Stmt::Match(stmt) => IrStmt::Match(IrMatchStmt {
             meta: stmt.meta.clone(),
@@ -1665,10 +1817,13 @@ fn stmt_to_ir(stmt: &Stmt) -> IrStmt {
             params: stmt.params.iter().map(|p| IrFuncParam {
                 name: p.name.clone(),
                 annotation: p.annotation.as_ref().map(expr_to_ir),
+                default: p.default.as_ref().map(expr_to_ir),
+                kind: p.kind,
             }).collect(),
             decorators: stmt.decorators.iter().map(expr_to_ir).collect(),
             body: block_to_ir(&stmt.body),
             return_type: stmt.return_type.as_ref().map(expr_to_ir),
+            is_async: stmt.is_async,
         }),
         Stmt::ClassDef(stmt) => IrStmt::ClassDef(IrClassDefStmt {
             meta: stmt.meta.clone(),
@@ -1679,7 +1834,7 @@ fn stmt_to_ir(stmt: &Stmt) -> IrStmt {
         }),
         Stmt::Assign(stmt) => IrStmt::Assign(IrAssignStmt {
             meta: stmt.meta.clone(),
-            target: expr_to_ir(&stmt.target),
+            targets: stmt.targets.iter().map(expr_to_ir).collect(),
             value: expr_to_ir(&stmt.value),
         }),
         Stmt::AugAssign(stmt) => IrStmt::AugAssign(IrAugAssignStmt {
@@ -1728,13 +1883,17 @@ fn stmt_to_ir(stmt: &Stmt) -> IrStmt {
                     body: block_to_ir(&h.body),
                 })
                 .collect(),
+            else_body: stmt.else_body.as_ref().map(block_to_ir),
             finally_body: stmt.finally_body.as_ref().map(block_to_ir),
         }),
         Stmt::With(stmt) => IrStmt::With(IrWithStmt {
             meta: stmt.meta.clone(),
-            context: expr_to_ir(&stmt.context),
-            name: stmt.name.clone(),
+            items: stmt.items.iter().map(|item| IrContextItem {
+                context: expr_to_ir(&item.context),
+                name: item.name.clone(),
+            }).collect(),
             body: block_to_ir(&stmt.body),
+            is_async: stmt.is_async,
         }),
         Stmt::Assert(stmt) => IrStmt::Assert(IrAssertStmt {
             meta: stmt.meta.clone(),
@@ -1790,12 +1949,15 @@ fn stmt_from_ir_with_indent(stmt: &IrStmt, indent_level: usize) -> Stmt {
             meta: stmt.meta.clone(),
             condition: expr_from_ir(&stmt.condition),
             body: block_from_ir_with_indent(&stmt.body, indent_level + 1),
+            else_body: stmt.else_body.as_ref().map(|b| block_from_ir_with_indent(b, indent_level + 1)),
         }),
         IrStmt::For(stmt) => Stmt::For(ForStmt {
             meta: stmt.meta.clone(),
             target: expr_from_ir(&stmt.target),
             iterable: expr_from_ir(&stmt.iterable),
             body: block_from_ir_with_indent(&stmt.body, indent_level + 1),
+            else_body: stmt.else_body.as_ref().map(|b| block_from_ir_with_indent(b, indent_level + 1)),
+            is_async: stmt.is_async,
         }),
         IrStmt::Match(stmt) => Stmt::Match(MatchStmt {
             meta: stmt.meta.clone(),
@@ -1824,10 +1986,13 @@ fn stmt_from_ir_with_indent(stmt: &IrStmt, indent_level: usize) -> Stmt {
             params: stmt.params.iter().map(|p| FuncParam {
                 name: p.name.clone(),
                 annotation: p.annotation.as_ref().map(expr_from_ir),
+                default: p.default.as_ref().map(expr_from_ir),
+                kind: p.kind,
             }).collect(),
             decorators: stmt.decorators.iter().map(expr_from_ir).collect(),
             body: block_from_ir_with_indent(&stmt.body, indent_level + 1),
             return_type: stmt.return_type.as_ref().map(expr_from_ir),
+            is_async: stmt.is_async,
         }),
         IrStmt::ClassDef(stmt) => Stmt::ClassDef(ClassDefStmt {
             meta: stmt.meta.clone(),
@@ -1838,7 +2003,7 @@ fn stmt_from_ir_with_indent(stmt: &IrStmt, indent_level: usize) -> Stmt {
         }),
         IrStmt::Assign(stmt) => Stmt::Assign(AssignStmt {
             meta: stmt.meta.clone(),
-            target: expr_from_ir(&stmt.target),
+            targets: stmt.targets.iter().map(expr_from_ir).collect(),
             value: expr_from_ir(&stmt.value),
         }),
         IrStmt::AugAssign(stmt) => Stmt::AugAssign(AugAssignStmt {
@@ -1887,6 +2052,7 @@ fn stmt_from_ir_with_indent(stmt: &IrStmt, indent_level: usize) -> Stmt {
                     body: block_from_ir_with_indent(&h.body, indent_level + 1),
                 })
                 .collect(),
+            else_body: stmt.else_body.as_ref().map(|b| block_from_ir_with_indent(b, indent_level + 1)),
             finally_body: stmt
                 .finally_body
                 .as_ref()
@@ -1894,9 +2060,12 @@ fn stmt_from_ir_with_indent(stmt: &IrStmt, indent_level: usize) -> Stmt {
         }),
         IrStmt::With(stmt) => Stmt::With(WithStmt {
             meta: stmt.meta.clone(),
-            context: expr_from_ir(&stmt.context),
-            name: stmt.name.clone(),
+            items: stmt.items.iter().map(|item| ContextItem {
+                context: expr_from_ir(&item.context),
+                name: item.name.clone(),
+            }).collect(),
             body: block_from_ir_with_indent(&stmt.body, indent_level + 1),
+            is_async: stmt.is_async,
         }),
         IrStmt::Assert(stmt) => Stmt::Assert(AssertStmt {
             meta: stmt.meta.clone(),
@@ -2119,6 +2288,23 @@ fn expr_to_ir(expr: &Expr) -> IrExpr {
             }).collect(),
             quote: expr.quote.clone(),
         }),
+        Expr::NamedExpr(expr) => IrExpr::NamedExpr(IrNamedExprData {
+            meta: expr.meta.clone(),
+            name: expr.name.clone(),
+            value: Box::new(expr_to_ir(&expr.value)),
+        }),
+        Expr::Yield(expr) => IrExpr::Yield(IrYieldExprData {
+            meta: expr.meta.clone(),
+            value: expr.value.as_ref().map(|v| Box::new(expr_to_ir(v))),
+        }),
+        Expr::YieldFrom(expr) => IrExpr::YieldFrom(IrYieldFromExprData {
+            meta: expr.meta.clone(),
+            value: Box::new(expr_to_ir(&expr.value)),
+        }),
+        Expr::Await(expr) => IrExpr::Await(IrAwaitExprData {
+            meta: expr.meta.clone(),
+            value: Box::new(expr_to_ir(&expr.value)),
+        }),
     }
 }
 
@@ -2288,6 +2474,23 @@ fn expr_from_ir(expr: &IrExpr) -> Expr {
                 IrFStringPart::Expr(e) => FStringPart::Expr(expr_from_ir(e)),
             }).collect(),
             quote: expr.quote.clone(),
+        }),
+        IrExpr::NamedExpr(expr) => Expr::NamedExpr(NamedExprData {
+            meta: expr.meta.clone(),
+            name: expr.name.clone(),
+            value: Box::new(expr_from_ir(&expr.value)),
+        }),
+        IrExpr::Yield(expr) => Expr::Yield(YieldExprData {
+            meta: expr.meta.clone(),
+            value: expr.value.as_ref().map(|v| Box::new(expr_from_ir(v))),
+        }),
+        IrExpr::YieldFrom(expr) => Expr::YieldFrom(YieldFromExprData {
+            meta: expr.meta.clone(),
+            value: Box::new(expr_from_ir(&expr.value)),
+        }),
+        IrExpr::Await(expr) => Expr::Await(AwaitExprData {
+            meta: expr.meta.clone(),
+            value: Box::new(expr_from_ir(&expr.value)),
         }),
     }
 }

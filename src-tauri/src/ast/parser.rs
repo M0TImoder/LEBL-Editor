@@ -36,6 +36,7 @@ struct Parser {
     config: ParserConfig,
     indent_width: usize,
     last_span: Span,
+    allow_in_compare: bool,
 }
 
 impl Parser {
@@ -48,6 +49,7 @@ impl Parser {
             config,
             indent_width,
             last_span,
+            allow_in_compare: true,
         }
     }
 
@@ -88,7 +90,7 @@ impl Parser {
             TokenKind::Keyword(Keyword::While) => self.parse_while_stmt(),
             TokenKind::Keyword(Keyword::For) => self.parse_for_stmt(),
             TokenKind::Keyword(Keyword::Match) => self.parse_match_stmt(),
-            TokenKind::Keyword(Keyword::Def) => self.parse_function_def(Vec::new()),
+            TokenKind::Keyword(Keyword::Def) => self.parse_function_def(Vec::new(), false),
             TokenKind::Keyword(Keyword::Class) => self.parse_class_def(Vec::new()),
             TokenKind::Operator(Operator::At) => self.parse_decorated(),
             TokenKind::Keyword(Keyword::Pass) => self.parse_pass_stmt(),
@@ -104,6 +106,7 @@ impl Parser {
             TokenKind::Keyword(Keyword::Del) => self.parse_del_stmt(),
             TokenKind::Keyword(Keyword::Global) => self.parse_global_stmt(),
             TokenKind::Keyword(Keyword::Nonlocal) => self.parse_nonlocal_stmt(),
+            TokenKind::Keyword(Keyword::Async) => self.parse_async_stmt(),
             TokenKind::Keyword(Keyword::Elif) | TokenKind::Keyword(Keyword::Else) => {
                 Err(self.error("elif/else must follow if"))
             }
@@ -225,14 +228,40 @@ impl Parser {
             }
         }
         if self.match_operator(Operator::Assign) {
-            let value = self.parse_expression_no_generator()?;
+            let value = self.parse_comma_separated_value()?;
             self.expect_line_end()?;
             let meta = self.node_meta(start, self.index.saturating_sub(1));
             return Ok(Stmt::Assign(AssignStmt {
                 meta,
-                target: expr,
+                targets: vec![expr],
                 value,
             }));
+        }
+        // Check for tuple unpacking: `a, b = 1, 2`
+        if self.check_tag(TokenTag::Comma) {
+            let saved = self.index;
+            let mut targets = vec![expr.clone()];
+            while self.match_tag(TokenTag::Comma) {
+                if self.check_tag(TokenTag::Newline) || self.check_tag(TokenTag::Eof) {
+                    break;
+                }
+                if self.peek_kind() == TokenKind::Operator(Operator::Assign) {
+                    break;
+                }
+                targets.push(self.parse_expression()?);
+            }
+            if self.match_operator(Operator::Assign) {
+                let value = self.parse_comma_separated_value()?;
+                self.expect_line_end()?;
+                let meta = self.node_meta(start, self.index.saturating_sub(1));
+                return Ok(Stmt::Assign(AssignStmt {
+                    meta,
+                    targets,
+                    value,
+                }));
+            }
+            // Not an assignment; restore position and fall through to expression statement
+            self.index = saved;
         }
         if let Some(op) = self.try_aug_assign_op() {
             let value = self.parse_expression_no_generator()?;
@@ -291,28 +320,46 @@ impl Parser {
         let condition = self.parse_expression()?;
         self.expect_tag(TokenTag::Colon)?;
         let body = self.parse_block()?;
+        let else_body = if self.match_keyword(Keyword::Else) {
+            self.expect_tag(TokenTag::Colon)?;
+            Some(self.parse_block()?)
+        } else {
+            None
+        };
         let meta = self.node_meta(start, self.index.saturating_sub(1));
         Ok(Stmt::While(WhileStmt {
             meta,
             condition,
             body,
+            else_body,
         }))
     }
 
     fn parse_for_stmt(&mut self) -> Result<Stmt, ParseError> {
         let start = self.index;
         self.expect_keyword(Keyword::For)?;
-        let target = self.parse_expression()?;
+        self.allow_in_compare = false;
+        let target = self.parse_expression();
+        self.allow_in_compare = true;
+        let target = target?;
         self.expect_keyword(Keyword::In)?;
         let iterable = self.parse_expression()?;
         self.expect_tag(TokenTag::Colon)?;
         let body = self.parse_block()?;
+        let else_body = if self.match_keyword(Keyword::Else) {
+            self.expect_tag(TokenTag::Colon)?;
+            Some(self.parse_block()?)
+        } else {
+            None
+        };
         let meta = self.node_meta(start, self.index.saturating_sub(1));
         Ok(Stmt::For(ForStmt {
             meta,
             target,
             iterable,
             body,
+            else_body,
+            is_async: false,
         }))
     }
 
@@ -324,13 +371,42 @@ impl Parser {
             decorators.push(expr);
         }
         match self.peek_kind() {
-            TokenKind::Keyword(Keyword::Def) => self.parse_function_def(decorators),
+            TokenKind::Keyword(Keyword::Def) => self.parse_function_def(decorators, false),
+            TokenKind::Keyword(Keyword::Async) => {
+                self.advance();
+                match self.peek_kind() {
+                    TokenKind::Keyword(Keyword::Def) => self.parse_function_def(decorators, true),
+                    _ => Err(self.error("expected 'def' after 'async' in decorated context")),
+                }
+            }
             TokenKind::Keyword(Keyword::Class) => self.parse_class_def(decorators),
             _ => Err(self.error("expected 'def' or 'class' after decorator")),
         }
     }
 
-    fn parse_function_def(&mut self, decorators: Vec<Expr>) -> Result<Stmt, ParseError> {
+    fn parse_async_stmt(&mut self) -> Result<Stmt, ParseError> {
+        self.expect_keyword(Keyword::Async)?;
+        match self.peek_kind() {
+            TokenKind::Keyword(Keyword::Def) => self.parse_function_def(Vec::new(), true),
+            TokenKind::Keyword(Keyword::For) => {
+                let mut stmt = self.parse_for_stmt()?;
+                if let Stmt::For(ref mut f) = stmt {
+                    f.is_async = true;
+                }
+                Ok(stmt)
+            }
+            TokenKind::Keyword(Keyword::With) => {
+                let mut stmt = self.parse_with_stmt()?;
+                if let Stmt::With(ref mut w) = stmt {
+                    w.is_async = true;
+                }
+                Ok(stmt)
+            }
+            _ => Err(self.error("expected 'def', 'for', or 'with' after 'async'")),
+        }
+    }
+
+    fn parse_function_def(&mut self, decorators: Vec<Expr>, is_async: bool) -> Result<Stmt, ParseError> {
         let start = self.index;
         self.expect_keyword(Keyword::Def)?;
         let name = self.expect_identifier()?;
@@ -338,13 +414,25 @@ impl Parser {
         let mut params = Vec::new();
         if !self.check_tag(TokenTag::RParen) {
             loop {
+                let kind = if self.match_operator(Operator::Power) {
+                    ParamKind::DoubleStar
+                } else if self.match_operator(Operator::Star) {
+                    ParamKind::Star
+                } else {
+                    ParamKind::Normal
+                };
                 let param_name = self.expect_identifier()?;
                 let annotation = if self.match_tag(TokenTag::Colon) {
                     Some(self.parse_expression_no_generator()?)
                 } else {
                     None
                 };
-                params.push(FuncParam { name: param_name, annotation });
+                let default = if self.match_operator(Operator::Assign) {
+                    Some(self.parse_expression_no_generator()?)
+                } else {
+                    None
+                };
+                params.push(FuncParam { name: param_name, annotation, default, kind });
                 if self.match_tag(TokenTag::Comma) {
                     if self.check_tag(TokenTag::RParen) {
                         break;
@@ -370,6 +458,7 @@ impl Parser {
             decorators,
             body,
             return_type,
+            is_async,
         }))
     }
 
@@ -448,6 +537,12 @@ impl Parser {
                 body: handler_body,
             });
         }
+        let else_body = if self.match_keyword(Keyword::Else) {
+            self.expect_tag(TokenTag::Colon)?;
+            Some(self.parse_block()?)
+        } else {
+            None
+        };
         let finally_body = if self.match_keyword(Keyword::Finally) {
             self.expect_tag(TokenTag::Colon)?;
             Some(self.parse_block()?)
@@ -459,6 +554,7 @@ impl Parser {
             meta,
             body,
             handlers,
+            else_body,
             finally_body,
         }))
     }
@@ -466,16 +562,23 @@ impl Parser {
     fn parse_with_stmt(&mut self) -> Result<Stmt, ParseError> {
         let start = self.index;
         self.expect_keyword(Keyword::With)?;
-        let context = self.parse_expression()?;
-        let name = if self.match_keyword(Keyword::As) {
-            Some(self.expect_identifier()?)
-        } else {
-            None
-        };
+        let mut items = Vec::new();
+        loop {
+            let context = self.parse_expression()?;
+            let name = if self.match_keyword(Keyword::As) {
+                Some(self.expect_identifier()?)
+            } else {
+                None
+            };
+            items.push(ContextItem { context, name });
+            if !self.match_tag(TokenTag::Comma) {
+                break;
+            }
+        }
         self.expect_tag(TokenTag::Colon)?;
         let body = self.parse_block()?;
         let meta = self.node_meta(start, self.index.saturating_sub(1));
-        Ok(Stmt::With(WithStmt { meta, context, name, body }))
+        Ok(Stmt::With(WithStmt { meta, items, body, is_async: false }))
     }
 
     fn parse_assert_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -640,12 +743,72 @@ impl Parser {
         self.parse_expression_with_generator(false, false)
     }
 
+    /// Parse a value that may be comma-separated (forming a tuple).
+    /// Used for the right side of assignments: `a, b = 1, 2` parses `1, 2` as Tuple.
+    fn parse_comma_separated_value(&mut self) -> Result<Expr, ParseError> {
+        let start = self.index;
+        let first = self.parse_expression_no_generator()?;
+        if !self.check_tag(TokenTag::Comma) {
+            return Ok(first);
+        }
+        let mut elements = vec![first];
+        while self.match_tag(TokenTag::Comma) {
+            if self.check_tag(TokenTag::Newline) || self.check_tag(TokenTag::Eof) {
+                break;
+            }
+            elements.push(self.parse_expression_no_generator()?);
+        }
+        let meta = self.node_meta(start, self.index.saturating_sub(1));
+        Ok(Expr::Tuple(TupleExpr { meta, elements }))
+    }
+
     fn parse_expression_with_generator(
         &mut self,
         allow_generator: bool,
         allow_if_expr: bool,
     ) -> Result<Expr, ParseError> {
         let start = self.index;
+
+        // yield has very low precedence
+        if self.match_keyword(Keyword::Yield) {
+            if self.match_keyword(Keyword::From) {
+                let value = self.parse_expression()?;
+                let meta = self.node_meta(start, self.index.saturating_sub(1));
+                return Ok(Expr::YieldFrom(YieldFromExprData {
+                    meta,
+                    value: Box::new(value),
+                }));
+            }
+            let tag = self.peek_kind().tag();
+            if tag == TokenTag::Newline
+                || tag == TokenTag::Eof
+                || tag == TokenTag::RParen
+                || tag == TokenTag::RBracket
+                || tag == TokenTag::RBrace
+                || tag == TokenTag::Comma
+                || tag == TokenTag::Dedent
+            {
+                let meta = self.node_meta(start, self.index.saturating_sub(1));
+                return Ok(Expr::Yield(YieldExprData { meta, value: None }));
+            }
+            let value = self.parse_expression()?;
+            let meta = self.node_meta(start, self.index.saturating_sub(1));
+            return Ok(Expr::Yield(YieldExprData {
+                meta,
+                value: Some(Box::new(value)),
+            }));
+        }
+
+        // await has very low precedence, similar to yield
+        if self.match_keyword(Keyword::Await) {
+            let value = self.parse_expression()?;
+            let meta = self.node_meta(start, self.index.saturating_sub(1));
+            return Ok(Expr::Await(AwaitExprData {
+                meta,
+                value: Box::new(value),
+            }));
+        }
+
         let expr = self.parse_lambda_with_if_expr(allow_if_expr)?;
         if allow_generator && self.match_keyword(Keyword::For) {
             let fors = self.parse_comprehension_fors()?;
@@ -657,6 +820,17 @@ impl Parser {
                     fors,
                 },
             )));
+        }
+        if let Expr::Identifier(ref ident) = expr {
+            if self.match_operator(Operator::ColonAssign) {
+                let value = self.parse_expression_with_generator(allow_generator, allow_if_expr)?;
+                let meta = self.node_meta(start, self.index.saturating_sub(1));
+                return Ok(Expr::NamedExpr(NamedExprData {
+                    meta,
+                    name: ident.name.clone(),
+                    value: Box::new(value),
+                }));
+            }
         }
         Ok(expr)
     }
@@ -811,6 +985,17 @@ impl Parser {
                 Ok(Expr::Unary(UnaryExpr {
                     meta,
                     op: UnaryOp::Not,
+                    expr: Box::new(expr),
+                }))
+            }
+            TokenKind::Operator(Operator::Tilde) => {
+                let start = self.index;
+                self.advance();
+                let expr = self.parse_unary()?;
+                let meta = self.node_meta(start, self.index.saturating_sub(1));
+                Ok(Expr::Unary(UnaryExpr {
+                    meta,
+                    op: UnaryOp::BitNot,
                     expr: Box::new(expr),
                 }))
             }
@@ -1190,6 +1375,31 @@ impl Parser {
                 precedence: BinaryOp::Power.precedence(),
                 assoc: Associativity::Right,
             }),
+            TokenKind::Operator(Operator::Ampersand) => Some(BinaryOpInfo {
+                op: BinaryOp::BitAnd,
+                precedence: BinaryOp::BitAnd.precedence(),
+                assoc: Associativity::Left,
+            }),
+            TokenKind::Operator(Operator::Pipe) => Some(BinaryOpInfo {
+                op: BinaryOp::BitOr,
+                precedence: BinaryOp::BitOr.precedence(),
+                assoc: Associativity::Left,
+            }),
+            TokenKind::Operator(Operator::Caret) => Some(BinaryOpInfo {
+                op: BinaryOp::BitXor,
+                precedence: BinaryOp::BitXor.precedence(),
+                assoc: Associativity::Left,
+            }),
+            TokenKind::Operator(Operator::LeftShift) => Some(BinaryOpInfo {
+                op: BinaryOp::LeftShift,
+                precedence: BinaryOp::LeftShift.precedence(),
+                assoc: Associativity::Left,
+            }),
+            TokenKind::Operator(Operator::RightShift) => Some(BinaryOpInfo {
+                op: BinaryOp::RightShift,
+                precedence: BinaryOp::RightShift.precedence(),
+                assoc: Associativity::Left,
+            }),
             _ => None,
         }
     }
@@ -1221,6 +1431,9 @@ impl Parser {
                 Some(CompareOp::GtEq)
             }
             TokenKind::Keyword(Keyword::In) => {
+                if !self.allow_in_compare {
+                    return None;
+                }
                 self.advance();
                 Some(CompareOp::In)
             }
@@ -1234,6 +1447,9 @@ impl Parser {
             }
             TokenKind::Keyword(Keyword::Not) => {
                 if matches!(self.peek_kind_offset(1), TokenKind::Keyword(Keyword::In)) {
+                    if !self.allow_in_compare {
+                        return None;
+                    }
                     self.advance();
                     self.advance();
                     Some(CompareOp::NotIn)

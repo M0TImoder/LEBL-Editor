@@ -71,9 +71,14 @@ export type binary_op =
   | "div"
   | "mod"
   | "floor_div"
-  | "power";
+  | "power"
+  | "bit_and"
+  | "bit_or"
+  | "bit_xor"
+  | "left_shift"
+  | "right_shift";
 
-export type unary_op = "neg" | "not";
+export type unary_op = "neg" | "not" | "bit_not";
 
 export type bool_op = "and" | "or";
 
@@ -110,7 +115,11 @@ export type expr =
   | { kind: "Set"; data: set_expr }
   | { kind: "Comprehension"; data: comprehension_expr }
   | { kind: "Slice"; data: slice_expr }
-  | { kind: "FString"; data: fstring_expr };
+  | { kind: "FString"; data: fstring_expr }
+  | { kind: "NamedExpr"; data: named_expr_data }
+  | { kind: "Yield"; data: yield_expr_data }
+  | { kind: "YieldFrom"; data: yield_from_expr_data }
+  | { kind: "Await"; data: await_expr_data };
 
 export type slice_expr = {
   meta: node_meta;
@@ -132,6 +141,27 @@ export type fstring_expr = {
   meta: node_meta;
   parts: fstring_part[];
   quote: "single" | "double";
+};
+
+export type named_expr_data = {
+  meta: node_meta;
+  name: string;
+  value: expr;
+};
+
+export type yield_expr_data = {
+  meta: node_meta;
+  value: expr | null;
+};
+
+export type yield_from_expr_data = {
+  meta: node_meta;
+  value: expr;
+};
+
+export type await_expr_data = {
+  meta: node_meta;
+  value: expr;
 };
 
 export type identifier_expr = {
@@ -332,6 +362,7 @@ export type ir_while_stmt = {
   meta: node_meta;
   condition: expr;
   body: ir_block;
+  else_body: ir_block | null;
 };
 
 export type ir_for_stmt = {
@@ -339,6 +370,8 @@ export type ir_for_stmt = {
   target: expr;
   iterable: expr;
   body: ir_block;
+  else_body: ir_block | null;
+  is_async?: boolean;
 };
 
 export type ir_match_stmt = {
@@ -354,16 +387,19 @@ export type ir_function_def = {
   decorators: expr[];
   body: ir_block;
   return_type: expr | null;
+  is_async?: boolean;
 };
 
 export type ir_func_param = {
   name: string;
   annotation: expr | null;
+  default_value: expr | null;
+  kind: "normal" | "star" | "double_star";
 };
 
 export type ir_assign_stmt = {
   meta: node_meta;
-  target: expr;
+  targets: expr[];
   value: expr;
 };
 
@@ -424,6 +460,7 @@ export type ir_try_stmt = {
   meta: node_meta;
   body: ir_block;
   handlers: ir_except_handler[];
+  else_body: ir_block | null;
   finally_body: ir_block | null;
 };
 
@@ -435,11 +472,16 @@ export type ir_class_def = {
   body: ir_block;
 };
 
-export type ir_with_stmt = {
-  meta: node_meta;
+export type ir_context_item = {
   context: expr;
   name: string | null;
+};
+
+export type ir_with_stmt = {
+  meta: node_meta;
+  items: ir_context_item[];
   body: ir_stmt[];
+  is_async?: boolean;
 };
 
 export type ir_assert_stmt = {
@@ -547,5 +589,20 @@ export type class_def_block = Blockly.Block & {
 
 export type import_block = Blockly.Block & {
   nameCount_: number;
+  updateShape_: () => void;
+};
+
+export type with_block = Blockly.Block & {
+  itemCount_: number;
+  updateShape_: () => void;
+};
+
+export type range_block = Blockly.Block & {
+  itemCount_: number;
+  updateShape_: () => void;
+};
+
+export type zip_block = Blockly.Block & {
+  itemCount_: number;
   updateShape_: () => void;
 };

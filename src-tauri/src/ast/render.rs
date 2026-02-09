@@ -86,30 +86,51 @@ fn render_stmt(
                 render_expr(&stmt.condition, 0)
             ));
             render_block(&stmt.body, indent_level + 1, indent_width, lines, context);
+            if let Some(body) = &stmt.else_body {
+                lines.push(format!("{prefix}else:"));
+                render_block(body, indent_level + 1, indent_width, lines, context);
+            }
         }
         Stmt::For(stmt) => {
+            let async_prefix = if stmt.is_async { "async " } else { "" };
             lines.push(format!(
-                "{prefix}for {} in {}:",
+                "{prefix}{async_prefix}for {} in {}:",
                 render_expr(&stmt.target, 0),
                 render_expr(&stmt.iterable, 0)
             ));
             render_block(&stmt.body, indent_level + 1, indent_width, lines, context);
+            if let Some(body) = &stmt.else_body {
+                lines.push(format!("{prefix}else:"));
+                render_block(body, indent_level + 1, indent_width, lines, context);
+            }
         }
         Stmt::FunctionDef(stmt) => {
             for decorator in &stmt.decorators {
                 lines.push(format!("{prefix}@{}", render_expr(decorator, 0)));
             }
             let params = stmt.params.iter().map(|p| {
-                if let Some(ref ann) = p.annotation {
-                    format!("{}: {}", p.name, render_expr(ann, 0))
+                let prefix = match p.kind {
+                    ParamKind::Star => "*",
+                    ParamKind::DoubleStar => "**",
+                    ParamKind::Normal => "",
+                };
+                let name_part = format!("{}{}", prefix, p.name);
+                let with_ann = if let Some(ref ann) = p.annotation {
+                    format!("{}: {}", name_part, render_expr(ann, 0))
                 } else {
-                    p.name.clone()
+                    name_part
+                };
+                if let Some(ref default) = p.default {
+                    format!("{} = {}", with_ann, render_expr(default, 0))
+                } else {
+                    with_ann
                 }
             }).collect::<Vec<_>>().join(", ");
+            let async_prefix = if stmt.is_async { "async " } else { "" };
             if let Some(ref ret) = stmt.return_type {
-                lines.push(format!("{prefix}def {}({}) -> {}:", stmt.name, params, render_expr(ret, 0)));
+                lines.push(format!("{prefix}{async_prefix}def {}({}) -> {}:", stmt.name, params, render_expr(ret, 0)));
             } else {
-                lines.push(format!("{prefix}def {}({}):", stmt.name, params));
+                lines.push(format!("{prefix}{async_prefix}def {}({}):", stmt.name, params));
             }
             render_block(&stmt.body, indent_level + 1, indent_width, lines, context);
         }
@@ -133,9 +154,13 @@ fn render_stmt(
             render_case_block(&stmt.cases, indent_level + 1, indent_width, lines, context);
         }
         Stmt::Assign(stmt) => {
+            let targets_str = stmt.targets.iter()
+                .map(|t| render_expr(t, 0))
+                .collect::<Vec<_>>()
+                .join(", ");
             lines.push(format!(
                 "{prefix}{} = {}",
-                render_expr(&stmt.target, 0),
+                targets_str,
                 render_expr(&stmt.value, 0)
             ));
         }
@@ -221,23 +246,25 @@ fn render_stmt(
                 }
                 render_block(&handler.body, indent_level + 1, indent_width, lines, context);
             }
+            if let Some(else_body) = &stmt.else_body {
+                lines.push(format!("{prefix}else:"));
+                render_block(else_body, indent_level + 1, indent_width, lines, context);
+            }
             if let Some(finally_body) = &stmt.finally_body {
                 lines.push(format!("{prefix}finally:"));
                 render_block(finally_body, indent_level + 1, indent_width, lines, context);
             }
         }
         Stmt::With(stmt) => {
-            if let Some(name) = &stmt.name {
-                lines.push(format!(
-                    "{prefix}with {} as {name}:",
-                    render_expr(&stmt.context, 0)
-                ));
-            } else {
-                lines.push(format!(
-                    "{prefix}with {}:",
-                    render_expr(&stmt.context, 0)
-                ));
-            }
+            let items_str = stmt.items.iter().map(|item| {
+                if let Some(name) = &item.name {
+                    format!("{} as {name}", render_expr(&item.context, 0))
+                } else {
+                    render_expr(&item.context, 0)
+                }
+            }).collect::<Vec<_>>().join(", ");
+            let async_prefix = if stmt.is_async { "async " } else { "" };
+            lines.push(format!("{prefix}{async_prefix}with {items_str}:"));
             render_block(&stmt.body, indent_level + 1, indent_width, lines, context);
         }
         Stmt::Assert(stmt) => {
@@ -475,7 +502,7 @@ fn render_expr(expr: &Expr, parent_prec: u8) -> String {
             }
         }
         Expr::Attribute(expr) => {
-            let prec = 9;
+            let prec = 13;
             wrap_if_needed(
                 format!("{}.{}", render_expr(&expr.value, prec), expr.attr),
                 prec,
@@ -483,7 +510,7 @@ fn render_expr(expr: &Expr, parent_prec: u8) -> String {
             )
         }
         Expr::Subscript(expr) => {
-            let prec = 9;
+            let prec = 13;
             wrap_if_needed(
                 format!(
                     "{}[{}]",
@@ -504,7 +531,7 @@ fn render_expr(expr: &Expr, parent_prec: u8) -> String {
             }
         }
         Expr::Call(expr) => {
-            let prec = 9;
+            let prec = 13;
             let callee = render_expr(&expr.callee, prec);
             let args_parts: Vec<String> = expr
                 .args
@@ -521,11 +548,12 @@ fn render_expr(expr: &Expr, parent_prec: u8) -> String {
             wrap_if_needed(rendered, prec, parent_prec)
         }
         Expr::Unary(expr) => {
-            let prec = 8;
+            let prec = 12;
             let value = render_expr(&expr.expr, prec);
             let op = match expr.op {
                 UnaryOp::Neg => "-",
                 UnaryOp::Not => "not ",
+                UnaryOp::BitNot => "~",
             };
             wrap_if_needed(format!("{op}{value}"), prec, parent_prec)
         }
@@ -600,6 +628,11 @@ fn render_expr(expr: &Expr, parent_prec: u8) -> String {
                 BinaryOp::Mod => "%",
                 BinaryOp::FloorDiv => "//",
                 BinaryOp::Power => "**",
+                BinaryOp::BitAnd => "&",
+                BinaryOp::BitOr => "|",
+                BinaryOp::BitXor => "^",
+                BinaryOp::LeftShift => "<<",
+                BinaryOp::RightShift => ">>",
             };
             wrap_if_needed(format!("{left} {op} {right}"), prec, parent_prec)
         }
@@ -621,6 +654,21 @@ fn render_expr(expr: &Expr, parent_prec: u8) -> String {
             }
             out.push(q);
             out
+        }
+        Expr::NamedExpr(expr) => {
+            format!("({} := {})", expr.name, render_expr(&expr.value, 0))
+        }
+        Expr::Yield(expr) => {
+            match &expr.value {
+                Some(v) => format!("yield {}", render_expr(v, 0)),
+                None => "yield".to_string(),
+            }
+        }
+        Expr::YieldFrom(expr) => {
+            format!("yield from {}", render_expr(&expr.value, 0))
+        }
+        Expr::Await(expr) => {
+            format!("await {}", render_expr(&expr.value, 0))
         }
     }
 }
