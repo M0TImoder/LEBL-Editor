@@ -124,16 +124,20 @@ body {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) 200px;
-  gap: 16px;
+  --splitter-size: 8px;
+  --output-height: 200px;
+  grid-template-rows: minmax(0, 1fr) var(--splitter-size) minmax(120px, var(--output-height));
+  gap: 0;
   padding: 16px;
 }
 
 .pane_group {
   min-height: 0;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  --splitter-size: 8px;
+  --pane-left-width: 1fr;
+  grid-template-columns: minmax(240px, var(--pane-left-width, 1fr)) var(--splitter-size) minmax(240px, 1fr);
+  gap: 0;
 }
 
 .pane {
@@ -144,6 +148,27 @@ body {
   border: 1px solid var(--app_border);
   border-radius: 12px;
   overflow: hidden;
+}
+
+.splitter {
+  background-color: var(--app_border);
+  border-radius: 6px;
+  user-select: none;
+  touch-action: none;
+  align-self: stretch;
+  justify-self: stretch;
+}
+
+.splitter:hover {
+  background-color: var(--app_accent);
+}
+
+.splitter-vertical {
+  cursor: col-resize;
+}
+
+.splitter-horizontal {
+  cursor: row-resize;
 }
 
 .pane_header {
@@ -410,10 +435,15 @@ body {
 
 @media (max-width: 980px) {
   .app_main {
-    grid-template-rows: minmax(0, 1fr) 180px;
+    grid-template-rows: minmax(0, 1fr) var(--splitter-size) minmax(120px, 180px);
   }
 
   .pane_group {
     grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .splitter-vertical {
+    display: none;
   }
 }

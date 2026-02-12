@@ -74,10 +74,20 @@ let is_running = false;
 let stream_unlisten: UnlistenFn | null = null;
 let current_theme: theme_mode = "light";
 let code_sync_timer: ReturnType<typeof setTimeout> | null = null;
+let blocks_sync_timer: ReturnType<typeof setTimeout> | null = null;
+let source_save_timer: ReturnType<typeof setTimeout> | null = null;
+let resize_frame: number | null = null;
 let pending_code_sync: string | null = null;
+let pending_source_save: string | null = null;
 let pending_blocks_sync = false;
 let current_file_path: string | null = null;
 const code_sync_delay_ms = 400;
+const blocks_sync_delay_ms = 200;
+const source_save_delay_ms = 500;
+const max_output_lines = 1000;
+const min_pane_width = 240;
+const min_output_height = 120;
+const min_editor_height = 220;
 
 interface FileTab {
   id: string;
@@ -311,12 +321,22 @@ const set_output = (text: string) => {
   }
 };
 
+const trim_output = () => {
+  if (!output_console) return;
+  while (output_console.childNodes.length > max_output_lines) {
+    const first_child = output_console.firstChild;
+    if (!first_child) break;
+    output_console.removeChild(first_child);
+  }
+};
+
 const append_output = (text: string, css_class?: string) => {
   if (!output_console) return;
   const span = document.createElement("span");
   if (css_class) span.className = css_class;
   span.textContent = text + "\n";
   output_console.appendChild(span);
+  trim_output();
   output_console.scrollTop = output_console.scrollHeight;
 };
 
@@ -455,7 +475,7 @@ const sync_blocks_to_code = async () => {
     const current = get_editor_value();
     if (current !== source) {
       set_editor_value(source);
-      localStorage.setItem(local_storage_source_key, source);
+      schedule_source_save(source);
     }
   } catch (error) {
     set_output(`${t("error_sync")}: ${String(error)}`);
@@ -475,6 +495,31 @@ const trigger_code_to_blocks_sync = () => {
   sync_code_to_blocks(source);
 };
 
+const flush_source_save = () => {
+  if (source_save_timer !== null) {
+    clearTimeout(source_save_timer);
+    source_save_timer = null;
+  }
+  if (pending_source_save !== null) {
+    localStorage.setItem(local_storage_source_key, pending_source_save);
+    pending_source_save = null;
+  }
+};
+
+const schedule_source_save = (source: string) => {
+  pending_source_save = source;
+  if (source_save_timer !== null) {
+    clearTimeout(source_save_timer);
+  }
+  source_save_timer = setTimeout(() => {
+    source_save_timer = null;
+    if (pending_source_save !== null) {
+      localStorage.setItem(local_storage_source_key, pending_source_save);
+      pending_source_save = null;
+    }
+  }, source_save_delay_ms);
+};
+
 const schedule_code_sync = (source: string) => {
   if (code_sync_timer !== null) {
     clearTimeout(code_sync_timer);
@@ -483,6 +528,105 @@ const schedule_code_sync = (source: string) => {
     code_sync_timer = null;
     sync_code_to_blocks(source);
   }, code_sync_delay_ms);
+};
+
+const schedule_blocks_sync = () => {
+  if (blocks_sync_timer !== null) {
+    clearTimeout(blocks_sync_timer);
+  }
+  blocks_sync_timer = setTimeout(() => {
+    blocks_sync_timer = null;
+    sync_blocks_to_code().catch(() => {});
+    refresh_declared_variable_category();
+  }, blocks_sync_delay_ms);
+};
+
+const schedule_editor_resize = () => {
+  if (resize_frame !== null) {
+    return;
+  }
+  resize_frame = window.requestAnimationFrame(() => {
+    resize_frame = null;
+    cm_editor?.requestMeasure();
+    const workspace_value = get_workspace();
+    if (workspace_value) {
+      Blockly.svgResize(workspace_value);
+    }
+  });
+};
+
+const init_pane_splitters = () => {
+  const pane_group = document.querySelector<HTMLElement>(".pane_group");
+  const app_main = document.querySelector<HTMLElement>(".app_main");
+  const code_pane = document.querySelector<HTMLElement>(".code_pane");
+  const output_pane = document.querySelector<HTMLElement>(".output_pane");
+  const vertical_splitter = document.getElementById("pane_splitter_vertical");
+  const horizontal_splitter = document.getElementById("pane_splitter_horizontal");
+  if (!pane_group || !app_main || !code_pane || !output_pane || !vertical_splitter || !horizontal_splitter) {
+    return;
+  }
+
+  const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+  vertical_splitter.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    const group_rect = pane_group.getBoundingClientRect();
+    const code_rect = code_pane.getBoundingClientRect();
+    const splitter_rect = vertical_splitter.getBoundingClientRect();
+    const start_x = event.clientX;
+    const start_width = code_rect.width;
+    const max_width = Math.max(min_pane_width, group_rect.width - min_pane_width - splitter_rect.width);
+    const on_move = (move_event: PointerEvent) => {
+      const next_width = clamp(
+        start_width + (move_event.clientX - start_x),
+        min_pane_width,
+        max_width,
+      );
+      pane_group.style.setProperty("--pane-left-width", `${next_width}px`);
+      schedule_editor_resize();
+    };
+    const stop = (end_event: PointerEvent) => {
+      vertical_splitter.releasePointerCapture(end_event.pointerId);
+      vertical_splitter.removeEventListener("pointermove", on_move);
+      vertical_splitter.removeEventListener("pointerup", stop);
+      vertical_splitter.removeEventListener("pointercancel", stop);
+      schedule_editor_resize();
+    };
+    vertical_splitter.setPointerCapture(event.pointerId);
+    vertical_splitter.addEventListener("pointermove", on_move);
+    vertical_splitter.addEventListener("pointerup", stop);
+    vertical_splitter.addEventListener("pointercancel", stop);
+  });
+
+  horizontal_splitter.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    const main_rect = app_main.getBoundingClientRect();
+    const output_rect = output_pane.getBoundingClientRect();
+    const splitter_rect = horizontal_splitter.getBoundingClientRect();
+    const start_y = event.clientY;
+    const start_height = output_rect.height;
+    const max_height = Math.max(min_output_height, main_rect.height - min_editor_height - splitter_rect.height);
+    const on_move = (move_event: PointerEvent) => {
+      const next_height = clamp(
+        start_height - (move_event.clientY - start_y),
+        min_output_height,
+        max_height,
+      );
+      app_main.style.setProperty("--output-height", `${next_height}px`);
+      schedule_editor_resize();
+    };
+    const stop = (end_event: PointerEvent) => {
+      horizontal_splitter.releasePointerCapture(end_event.pointerId);
+      horizontal_splitter.removeEventListener("pointermove", on_move);
+      horizontal_splitter.removeEventListener("pointerup", stop);
+      horizontal_splitter.removeEventListener("pointercancel", stop);
+      schedule_editor_resize();
+    };
+    horizontal_splitter.setPointerCapture(event.pointerId);
+    horizontal_splitter.addEventListener("pointermove", on_move);
+    horizontal_splitter.addEventListener("pointerup", stop);
+    horizontal_splitter.addEventListener("pointercancel", stop);
+  });
 };
 
 const load_source_from_storage = () =>
@@ -589,7 +733,7 @@ const create_codemirror = (parent: HTMLElement, initial_source: string) => {
   const update_listener = EditorView.updateListener.of((update) => {
     if (update.docChanged && !is_syncing) {
       const source_value = update.state.doc.toString();
-      localStorage.setItem(local_storage_source_key, source_value);
+      schedule_source_save(source_value);
       schedule_code_sync(source_value);
       const tab = get_active_tab();
       if (tab) {
@@ -744,6 +888,7 @@ export const init_app = () => {
     if (editor_container) {
       create_codemirror(editor_container, initial_source);
     }
+    init_pane_splitters();
 
     // Initialize default tab
     const default_tab: FileTab = {
@@ -775,12 +920,11 @@ export const init_app = () => {
           event.type === Blockly.Events.TOOLBOX_ITEM_SELECT ||
           event.type === Blockly.Events.CLICK ||
           event.type === Blockly.Events.SELECTED;
-        if (dominated) {
-          return;
-        }
-        sync_blocks_to_code().catch(() => {});
-        refresh_declared_variable_category();
-      });
+      if (dominated) {
+        return;
+      }
+      schedule_blocks_sync();
+    });
 
       workspace.addChangeListener((event: Blockly.Events.Abstract) => {
         if (event.type !== Blockly.Events.SELECTED || !cm_editor) {
@@ -980,12 +1124,12 @@ export const init_app = () => {
 
     update_ui_text();
     sync_code_to_blocks(initial_source);
+    window.addEventListener("beforeunload", () => {
+      flush_source_save();
+    });
 
     window.addEventListener("resize", () => {
-      const workspace_value = get_workspace();
-      if (workspace_value) {
-        Blockly.svgResize(workspace_value);
-      }
+      schedule_editor_resize();
     });
   });
 };
