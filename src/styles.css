@@ -151,7 +151,7 @@ body {
 }
 
 .splitter {
-  background-color: var(--app_border);
+  background-color: transparent;
   border-radius: 6px;
   user-select: none;
   touch-action: none;
@@ -160,7 +160,7 @@ body {
 }
 
 .splitter:hover {
-  background-color: var(--app_accent);
+  background-color: transparent;
 }
 
 .splitter-vertical {
